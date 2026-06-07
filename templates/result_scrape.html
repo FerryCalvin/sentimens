@@ -1,0 +1,305 @@
+{% extends "base.html" %}
+
+{% block title %}Hasil Scraping: {{ keyword }} — SentimenID{% endblock %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/dataTables.bootstrap5.min.css" />
+{% endblock %}
+
+{% block content %}
+<section class="py-4">
+  <div class="container">
+    <!-- Breadcrumb -->
+    <nav aria-label="breadcrumb" class="mb-4">
+      <ol class="breadcrumb" style="background:none;padding:0;font-size:0.85rem">
+        <li class="breadcrumb-item">
+          <a href="{{ url_for('index') }}" class="text-decoration-none" style="color:var(--primary-light)">
+            <i class="bi bi-house me-1"></i>Beranda
+          </a>
+        </li>
+        <li class="breadcrumb-item">
+          <a href="{{ url_for('scrape') }}" class="text-decoration-none" style="color:var(--primary-light)">Live Scraping</a>
+        </li>
+        <li class="breadcrumb-item active" style="color:var(--text-muted)">Hasil: "{{ keyword }}"</li>
+      </ol>
+    </nav>
+
+    <!-- Header -->
+    <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-4">
+      <div>
+        <h1 class="h3 fw-bold mb-1" style="color:var(--text-primary)">
+          <i class="bi bi-check-circle-fill me-2" style="color:#34d399"></i>
+          Hasil Scraping: <em>"{{ keyword }}"</em>
+        </h1>
+        <p class="text-muted mb-0" style="font-size:0.875rem">
+          {{ scrape_count }} data berhasil diambil dan dianalisis
+        </p>
+      </div>
+      <div class="d-flex gap-2">
+        <a href="{{ url_for('dashboard') }}" class="btn btn-primary-dark">
+          <i class="bi bi-bar-chart-line me-2"></i>Lihat Dashboard
+        </a>
+        <a href="{{ url_for('scrape') }}" class="btn btn-outline-dark">
+          <i class="bi bi-arrow-repeat me-1"></i>Cari Lagi
+        </a>
+      </div>
+    </div>
+
+    <!-- Summary Stats -->
+    <div class="row g-3 mb-4">
+      <div class="col-6 col-md-3">
+        <div class="stat-card stat-card-total" style="background:var(--bg-card)">
+          <div class="stat-value" style="color:var(--primary-light)">{{ summary.total }}</div>
+          <div class="stat-label">Total Data</div>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="stat-card stat-card-positif" style="background:var(--bg-card)">
+          <div class="stat-value" style="color:#4ade80">{{ summary.positif }}</div>
+          <div class="stat-label">Positif ({{ summary.positif_pct }}%)</div>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="stat-card stat-card-negatif" style="background:var(--bg-card)">
+          <div class="stat-value" style="color:#f87171">{{ summary.negatif }}</div>
+          <div class="stat-label">Negatif ({{ summary.negatif_pct }}%)</div>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="stat-card stat-card-netral" style="background:var(--bg-card)">
+          <div class="stat-value" style="color:#9ca3af">{{ summary.netral }}</div>
+          <div class="stat-label">Netral ({{ summary.netral_pct }}%)</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Charts Row -->
+    <div class="row g-4 mb-4">
+      <!-- Pie Chart -->
+      <div class="col-md-4">
+        <div class="chart-container h-100">
+          <div class="chart-title">
+            <i class="bi bi-pie-chart-fill" style="color:var(--primary-light)"></i>
+            Komposisi Sentimen
+          </div>
+          <canvas id="pieChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Line Chart (FR-VZ-01) -->
+      <div class="col-md-8">
+        <div class="chart-container h-100">
+          <div class="chart-title">
+            <i class="bi bi-graph-up" style="color:var(--primary-light)"></i>
+            Tren Sentimen Berdasarkan Waktu
+          </div>
+          <canvas id="lineChart" style="max-height:260px"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Word Cloud -->
+    <div class="row g-4 mb-4">
+      <div class="col-12">
+        <div class="chart-container">
+          <div class="chart-title">
+            <i class="bi bi-chat-square-text-fill" style="color:var(--primary-light)"></i>
+            Word Cloud — Kata Paling Sering Muncul
+          </div>
+          <canvas id="wordCloudCanvas" style="height:280px;width:100%"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Data Table (US-03.3) -->
+    <div class="card-dark p-4">
+      <div class="chart-title mb-3">
+        <i class="bi bi-table" style="color:var(--primary-light)"></i>
+        Tabel Data Mentah — Sortable
+      </div>
+      <div class="table-responsive">
+        <table class="table table-dark-custom table-hover" id="scrapeTable">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Teks</th>
+              <th>Tanggal</th>
+              <th>Sentimen</th>
+              <th>Confidence</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in results %}
+            <tr>
+              <td class="text-muted">{{ loop.index }}</td>
+              <td style="max-width:350px">
+                <div style="overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;font-size:0.875rem">
+                  {{ r.raw_text }}
+                </div>
+              </td>
+              <td>
+                <span style="font-size:0.78rem;color:var(--text-muted)">
+                  {{ r.date[:10] if r.date else '—' }}
+                </span>
+              </td>
+              <td>
+                {% if r.predicted_label == 'Positif' %}
+                  <span class="sentiment-badge sentiment-positif" style="font-size:0.75rem;padding:0.25rem 0.6rem">Positif</span>
+                {% elif r.predicted_label == 'Negatif' %}
+                  <span class="sentiment-badge sentiment-negatif" style="font-size:0.75rem;padding:0.25rem 0.6rem">Negatif</span>
+                {% else %}
+                  <span class="sentiment-badge sentiment-netral" style="font-size:0.75rem;padding:0.25rem 0.6rem">Netral</span>
+                {% endif %}
+              </td>
+              <td style="font-size:0.78rem">
+                {% set top_conf = [r.confidence_positive, r.confidence_negative, r.confidence_neutral] | max %}
+                <strong style="color:
+                  {% if r.predicted_label == 'Positif' %}#4ade80
+                  {% elif r.predicted_label == 'Negatif' %}#f87171
+                  {% else %}#9ca3af{% endif %}">
+                  {{ (top_conf * 100) | round(1) }}%
+                </strong>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/wordcloud@1.2.2/src/wordcloud2.js"></script>
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.8/js/dataTables.bootstrap5.min.js"></script>
+<script>
+const chartData = {{ chart_data | safe }};
+const wordFreqData = {{ word_freq | safe }};
+
+document.addEventListener('DOMContentLoaded', () => {
+  // Chart.js global defaults
+  Chart.defaults.color = '#94a3b8';
+  Chart.defaults.font.family = 'Inter, sans-serif';
+  Chart.defaults.font.size = 12;
+
+  // --- Pie / Doughnut Chart ---
+  new Chart(document.getElementById('pieChart'), {
+    type: 'doughnut',
+    data: {
+      labels: chartData.pie.labels,
+      datasets: [{
+        data: chartData.pie.data,
+        backgroundColor: chartData.pie.colors,
+        borderColor: '#0f0f1a',
+        borderWidth: 3,
+        hoverOffset: 8,
+      }]
+    },
+    options: {
+      responsive: true,
+      cutout: '65%',
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: { color: '#94a3b8', padding: 16, boxWidth: 12 }
+        }
+      }
+    }
+  });
+
+  // --- Line Chart ---
+  const ld = chartData.line;
+  new Chart(document.getElementById('lineChart'), {
+    type: 'line',
+    data: {
+      labels: ld.labels,
+      datasets: [
+        {
+          label: 'Positif',
+          data: ld.positif,
+          borderColor: '#28a745',
+          backgroundColor: 'rgba(40,167,69,0.1)',
+          tension: 0.4,
+          fill: true,
+          pointRadius: 4,
+          pointBackgroundColor: '#28a745',
+        },
+        {
+          label: 'Negatif',
+          data: ld.negatif,
+          borderColor: '#dc3545',
+          backgroundColor: 'rgba(220,53,69,0.1)',
+          tension: 0.4,
+          fill: true,
+          pointRadius: 4,
+          pointBackgroundColor: '#dc3545',
+        },
+        {
+          label: 'Netral',
+          data: ld.netral,
+          borderColor: '#6c757d',
+          backgroundColor: 'rgba(108,117,125,0.1)',
+          tension: 0.4,
+          fill: true,
+          pointRadius: 4,
+          pointBackgroundColor: '#6c757d',
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: {
+          grid: { color: 'rgba(255,255,255,0.05)' },
+          ticks: { color: '#64748b', maxRotation: 45 }
+        },
+        y: {
+          grid: { color: 'rgba(255,255,255,0.05)' },
+          ticks: { color: '#64748b', precision: 0 },
+          beginAtZero: true,
+        }
+      },
+      plugins: {
+        legend: {
+          labels: { color: '#94a3b8', padding: 16, boxWidth: 12 }
+        }
+      }
+    }
+  });
+
+  // --- Word Cloud ---
+  const canvas = document.getElementById('wordCloudCanvas');
+  if (canvas && Object.keys(wordFreqData).length > 0) {
+    WordCloud(canvas, {
+      list: Object.entries(wordFreqData),
+      gridSize: 10,
+      weightFactor: size => Math.max(14, size * 3),
+      fontFamily: 'Inter, sans-serif',
+      color: () => ['#a5b4fc','#34d399','#60a5fa','#fbbf24','#f87171','#c084fc'][Math.floor(Math.random()*6)],
+      rotateRatio: 0.25,
+      backgroundColor: 'transparent',
+    });
+  }
+
+  // --- DataTable ---
+  $('#scrapeTable').DataTable({
+    pageLength: 25,
+    order: [[2, 'desc']],
+    language: {
+      search: "Cari:",
+      lengthMenu: "Tampilkan _MENU_ baris",
+      info: "Menampilkan _START_ sampai _END_ dari _TOTAL_ baris",
+      paginate: {
+        next: '<i class="bi bi-chevron-right"></i>',
+        previous: '<i class="bi bi-chevron-left"></i>',
+      }
+    },
+  });
+});
+</script>
+{% endblock %}
