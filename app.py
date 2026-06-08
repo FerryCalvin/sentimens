@@ -452,6 +452,164 @@ def health_check():
 
 
 # =============================================================
+# API JSON ENDPOINTS — dipanggil oleh UI via fetch()
+# (Semua route lama tetap ada, ini hanya tambahan baru)
+# =============================================================
+
+@app.route("/api/analyze", methods=["POST"])
+def api_analyze():
+    """JSON endpoint analisis teks tunggal — dipanggil SPA via fetch()."""
+    if not MODEL_LOADED:
+        return jsonify({"error": "Model belum dimuat."}), 503
+
+    body     = request.get_json(force=True, silent=True) or {}
+    raw_text = str(body.get("text", "")).strip()
+
+    if not raw_text or len(raw_text) < 3:
+        return jsonify({"error": "Teks terlalu pendek (minimal 3 karakter)."}), 400
+
+    raw_text = str(escape(raw_text))
+
+    try:
+        clean_text = preprocess_text(raw_text)
+        result     = predict_sentiment(clean_text)
+        return jsonify({
+            "raw_text":            raw_text,
+            "clean_text":          clean_text,
+            "predicted_label":     result["predicted_label"],
+            "confidence_positive": result["confidence_positive"],
+            "confidence_negative": result["confidence_negative"],
+            "confidence_neutral":  result["confidence_neutral"],
+            "inference_time_ms":   result["inference_time_ms"],
+        })
+    except Exception as e:
+        logger.error(f"/api/analyze error: {e}", exc_info=True)
+        return jsonify({"error": "Terjadi kesalahan saat menganalisis."}), 500
+
+
+@app.route("/api/batch", methods=["POST"])
+def api_batch():
+    """JSON endpoint batch CSV — dipanggil SPA via fetch() + FormData."""
+    if not MODEL_LOADED:
+        return jsonify({"error": "Model belum dimuat."}), 503
+
+    csv_file = request.files.get("csv_file")
+    is_valid, error_msg, df = validate_csv(csv_file)
+    if not is_valid:
+        return jsonify({"error": error_msg}), 400
+
+    text_col = detect_text_column(df)
+    if text_col is None:
+        return jsonify({"error": "Tidak dapat mendeteksi kolom teks."}), 400
+
+    try:
+        raw_texts   = df[text_col].fillna("").tolist()
+        clean_texts = [preprocess_text(str(t).strip()) if str(t).strip() else "" for t in raw_texts]
+        predictions = predict_batch(clean_texts)
+
+        results = []
+        for raw, clean, pred in zip(raw_texts, clean_texts, predictions):
+            raw_str  = str(raw).strip()
+            is_empty = not raw_str or not clean
+            if is_empty:
+                pred["skipped"] = True
+            results.append({
+                "raw_text":            raw_str,
+                "clean_text":          clean,
+                "predicted_label":     pred.get("predicted_label", "Netral"),
+                "confidence_positive": pred.get("confidence_positive", 0.0),
+                "confidence_negative": pred.get("confidence_negative", 0.0),
+                "confidence_neutral":  pred.get("confidence_neutral",  0.0),
+                "inference_time_ms":   pred.get("inference_time_ms",   0.0),
+                "skipped":             pred.get("skipped", False),
+            })
+
+        summary    = calculate_summary(results)
+        csv_output = generate_csv_output(results)
+        return jsonify({
+            "results":       results[:100],
+            "total_results": len(results),
+            "summary":       summary,
+            "csv_content":   csv_output,
+        })
+    except Exception as e:
+        logger.error(f"/api/batch error: {e}", exc_info=True)
+        return jsonify({"error": "Terjadi kesalahan saat memproses CSV."}), 500
+
+
+@app.route("/api/scrape", methods=["POST"])
+def api_scrape():
+    """JSON endpoint live scraping — dipanggil SPA via fetch()."""
+    if not MODEL_LOADED:
+        return jsonify({"error": "Model belum dimuat."}), 503
+
+    body    = request.get_json(force=True, silent=True) or {}
+    keyword = str(body.get("keyword", "")).strip()
+    if not keyword:
+        return jsonify({"error": "Kata kunci tidak boleh kosong."}), 400
+
+    keyword = str(escape(keyword))
+    try:
+        limit = int(body.get("limit", DEFAULT_SCRAPE_LIMIT))
+        limit = max(10, min(limit, 500))
+    except (ValueError, TypeError):
+        limit = DEFAULT_SCRAPE_LIMIT
+
+    try:
+        scraper_url = f"{SCRAPER_BASE_URL}{SCRAPER_ENDPOINT}"
+        response    = httpx.post(
+            scraper_url,
+            json={"keyword": keyword, "limit": limit},
+            timeout=SCRAPER_TIMEOUT,
+        )
+        response.raise_for_status()
+        scraper_data = response.json()
+
+        if scraper_data.get("status") != "success":
+            return jsonify({"error": scraper_data.get("message", "Scraping gagal.")}), 502
+
+        tweets = scraper_data.get("data", [])
+        if not tweets:
+            return jsonify({"error": f"Tidak ada data untuk '{keyword}'."}), 404
+
+        raw_texts   = [t.get("text", "") for t in tweets]
+        dates       = [t.get("date", "")  for t in tweets]
+        clean_texts = [preprocess_text(t)  for t in raw_texts]
+        predictions = predict_batch(clean_texts)
+
+        results = []
+        for raw, clean, date, pred in zip(raw_texts, clean_texts, dates, predictions):
+            results.append({
+                "raw_text":            raw,
+                "clean_text":          clean,
+                "date":                date,
+                "predicted_label":     pred.get("predicted_label", "Netral"),
+                "confidence_positive": pred.get("confidence_positive", 0.0),
+                "confidence_negative": pred.get("confidence_negative", 0.0),
+                "confidence_neutral":  pred.get("confidence_neutral",  0.0),
+                "inference_time_ms":   pred.get("inference_time_ms",   0.0),
+            })
+
+        summary    = calculate_summary(results)
+        csv_output = generate_csv_output(results)
+        return jsonify({
+            "results":       results[:100],
+            "total_results": len(results),
+            "keyword":       keyword,
+            "summary":       summary,
+            "csv_content":   csv_output,
+        })
+
+    except httpx.ConnectError:
+        return jsonify({"error": "Scraper tidak aktif (port 8000)."}), 503
+    except httpx.TimeoutException:
+        return jsonify({"error": "Scraping timeout. Coba kurangi limit."}), 504
+    except Exception as e:
+        logger.error(f"/api/scrape error: {e}", exc_info=True)
+        return jsonify({"error": "Terjadi kesalahan saat scraping."}), 500
+
+
+# =============================================================
 # Error Handlers (NFR-S-05)
 # =============================================================
 

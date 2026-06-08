@@ -2,6 +2,7 @@
 # scraper/main.py — FastAPI Scraper Microservice (Port 8000)
 # Mengimplementasikan FR-SC-01, FR-SC-02, FR-SC-03
 # ============================================================
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -52,8 +53,13 @@ class ScrapeResponse(BaseModel):
 async def lifespan(app: FastAPI):
     """Lifecycle manager untuk startup/shutdown."""
     logger.info("FastAPI Scraper Service dimulai — Port 8000")
-    yield
-    logger.info("FastAPI Scraper Service dihentikan")
+    try:
+        yield
+    except asyncio.CancelledError:
+        # Graceful shutdown saat CTRL+C — tidak perlu raise ulang
+        pass
+    finally:
+        logger.info("FastAPI Scraper Service dihentikan")
 
 
 app = FastAPI(

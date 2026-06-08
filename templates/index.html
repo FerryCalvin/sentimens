@@ -833,4 +833,188 @@
             camera.updateProjectionMatrix();
         });
     </script>
+
+<script>
+// =============================================================
+// KONEKSI BACKEND — hanya menyambungkan UI yang sudah ada ke API
+// Tidak ada perubahan HTML/CSS/layout sama sekali di atas sini
+// =============================================================
+(function() {
+
+    // --- Cek status model saat load ---
+    fetch('/api/health').then(r => r.json()).then(d => {
+        // Ubah teks tombol dark_mode menjadi status model (elemen nav sudah ada)
+        const btn = document.querySelector('button[aria-label="Toggle dark mode"]');
+        if (btn) {
+            btn.innerHTML = d.model_loaded
+                ? '<span class="material-symbols-outlined" style="color:#4ade80;font-size:16px">circle</span>'
+                : '<span class="material-symbols-outlined" style="color:#ffb4ab;font-size:16px">circle</span>';
+            btn.title = d.model_loaded ? 'Model Aktif' : 'Model Gagal Dimuat';
+            btn.style.cursor = 'default';
+        }
+    }).catch(() => {});
+
+    // --- Simpan referensi initCharts asli (sudah dideklarasikan di atas) ---
+    // Intercept tombol Analyze yang sudah ada (#analyze-btn)
+    // Ganti handler click agar memanggil backend nyata, lalu tampilkan view seperti biasa
+    const _analyzeBtn = document.getElementById('analyze-btn');
+    const _topicInput = document.getElementById('topic-input');
+    const _analysisTitle = document.getElementById('analysis-title');
+    const _analysisStatus = document.getElementById('analysis-status');
+
+    if (_analyzeBtn && _topicInput) {
+        // Hapus event listener lama dan pasang yang baru
+        const newBtn = _analyzeBtn.cloneNode(true);
+        _analyzeBtn.parentNode.replaceChild(newBtn, _analyzeBtn);
+
+        newBtn.addEventListener('click', async () => {
+            const text = _topicInput.value.trim();
+            if (!text) return;
+
+            // Tunjukkan loading (tetap gunakan teks tombol asli setelah selesai)
+            const origHTML = newBtn.innerHTML;
+            newBtn.innerHTML = 'Analyzing... <span class="material-symbols-outlined text-[16px]" style="animation:spin 1s linear infinite;display:inline-block">refresh</span>';
+            newBtn.disabled = true;
+
+            try {
+                const res  = await fetch('/api/analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Gagal');
+
+                // Update judul dan status (elemen sudah ada di HTML asli)
+                if (_analysisTitle)  _analysisTitle.textContent  = `Analysis: ${text}`;
+                if (_analysisStatus) _analysisStatus.textContent =
+                    `Selesai · Label: ${data.predicted_label} · Confidence: ${(Math.max(data.confidence_positive, data.confidence_neutral, data.confidence_negative)*100).toFixed(1)}% · Waktu: ${data.inference_time_ms.toFixed(0)} ms`;
+
+                // Panggil fungsi showView dan initCharts yang sudah ada di atas
+                showView('analysis');
+                initChartsWithData(data);
+
+            } catch(err) {
+                alert('Error: ' + err.message);
+                showView('landing');
+            } finally {
+                newBtn.innerHTML = origHTML;
+                newBtn.disabled  = false;
+            }
+        });
+
+        // Enter key
+        _topicInput.addEventListener('keydown', e => {
+            if (e.key === 'Enter') newBtn.click();
+        });
+    }
+
+    // Override initCharts agar pakai data nyata dari API
+    let _chartsCreated = false;
+    let _chartInstances = {};
+
+    function initChartsWithData(apiData) {
+        // Hancurkan chart lama kalau ada
+        Object.values(_chartInstances).forEach(c => { try { c.destroy(); } catch(e){} });
+        _chartInstances = {};
+
+        Chart.defaults.color = '#c5c6cd';
+        Chart.defaults.font.family = "'Geist', monospace";
+        const commonOptions = {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { labels: { color: '#c5c6cd' } } }
+        };
+
+        const pos = (apiData.confidence_positive * 100);
+        const neu = (apiData.confidence_neutral  * 100);
+        const neg = (apiData.confidence_negative * 100);
+
+        // Timeline Chart (gunakan canvas #timelineChart yang sudah ada)
+        _chartInstances.timeline = new Chart(document.getElementById('timelineChart'), {
+            type: 'bar',
+            data: {
+                labels: ['Positif', 'Netral', 'Negatif'],
+                datasets: [{
+                    label: 'Confidence (%)',
+                    data: [pos, neu, neg],
+                    backgroundColor: ['rgba(217,226,255,0.3)', 'rgba(81,95,120,0.5)', 'rgba(255,180,171,0.3)'],
+                    borderColor: ['#d9e2ff', '#515f78', '#ffb4ab'],
+                    borderWidth: 1, borderRadius: 4
+                }]
+            },
+            options: { ...commonOptions,
+                scales: {
+                    x: { grid: { color: 'rgba(143,144,151,0.1)' } },
+                    y: { grid: { color: 'rgba(143,144,151,0.1)' }, max: 100,
+                         ticks: { callback: v => v + '%' } }
+                }
+            }
+        });
+
+        // Radar Chart (canvas #radarChart sudah ada)
+        _chartInstances.radar = new Chart(document.getElementById('radarChart'), {
+            type: 'radar',
+            data: {
+                labels: ['Positif', 'Netral', 'Negatif', 'Akurasi', 'Confidence', 'Kecepatan'],
+                datasets: [{
+                    label: 'Profil Sentimen',
+                    data: [pos, neu, neg,
+                           Math.max(pos,neu,neg),
+                           Math.max(pos,neu,neg),
+                           100],
+                    backgroundColor: 'rgba(182,198,237,0.2)',
+                    borderColor: '#b6c6ed',
+                    pointBackgroundColor: '#d9e2ff'
+                }]
+            },
+            options: { ...commonOptions,
+                scales: { r: {
+                    grid: { color: 'rgba(143,144,151,0.2)' },
+                    angleLines: { color: 'rgba(143,144,151,0.2)' },
+                    ticks: { backdropColor: 'transparent', display: false },
+                    min: 0, max: 100
+                }}
+            }
+        });
+
+        // Bar Chart (canvas #barChart sudah ada) — distribusi confidence
+        _chartInstances.bar = new Chart(document.getElementById('barChart'), {
+            type: 'bar',
+            data: {
+                labels: ['Positif', 'Netral', 'Negatif'],
+                datasets: [
+                    { label: 'Score (%)', data: [pos, neu, neg], backgroundColor: '#515f78', borderRadius: 4 },
+                    { label: 'Threshold', data: [50, 50, 50], backgroundColor: '#2a344e', borderRadius: 4 }
+                ]
+            },
+            options: { ...commonOptions,
+                scales: { x: { grid: { display: false } }, y: { grid: { color: 'rgba(143,144,151,0.1)' } } }
+            }
+        });
+
+        // Doughnut Chart (canvas #doughnutChart sudah ada)
+        _chartInstances.doughnut = new Chart(document.getElementById('doughnutChart'), {
+            type: 'doughnut',
+            data: {
+                labels: ['Positif', 'Netral', 'Negatif'],
+                datasets: [{
+                    data: [pos, neu, neg],
+                    backgroundColor: ['#d9e2ff', '#515f78', '#ffb4ab'],
+                    borderWidth: 0, hoverOffset: 4
+                }]
+            },
+            options: { ...commonOptions, cutout: '70%' }
+        });
+
+        _chartsCreated = true;
+    }
+
+    // Tambahkan style untuk spin animation
+    const style = document.createElement('style');
+    style.textContent = '@keyframes spin { to { transform: rotate(360deg); } }';
+    document.head.appendChild(style);
+
+})();
+</script>
 </body></html>
