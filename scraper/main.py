@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 from scraper import run_scrape
 
@@ -27,7 +27,8 @@ class ScrapeRequest(BaseModel):
     keyword: str = Field(..., min_length=1, max_length=200, description="Kata kunci pencarian")
     limit: int = Field(default=100, ge=10, le=500, description="Jumlah data yang diminta")
 
-    @validator("keyword")
+    @field_validator("keyword")
+    @classmethod
     def keyword_must_not_be_empty(cls, v):
         if not v.strip():
             raise ValueError("Kata kunci tidak boleh hanya spasi")
