@@ -396,6 +396,47 @@ def build_distribution(df: pd.DataFrame) -> dict:
         'total': len(df)
     }
 
+def get_overall_distribution(df: pd.DataFrame) -> dict:
+    """Alias untuk build_distribution — dipakai oleh /api/results endpoints."""
+    return build_distribution(df)
+
+
+def get_timeline_data(df: pd.DataFrame) -> list:
+    """
+    Konversi timeline dict ke format list yang dipakai frontend SPA.
+    Returns list of {date, positive, negative, neutral}.
+    """
+    if 'date' not in df.columns or df.empty:
+        return []
+
+    try:
+        # Pastikan kolom date sudah datetime
+        if not pd.api.types.is_datetime64_any_dtype(df['date']):
+            df = df.copy()
+            df['date'] = pd.to_datetime(df['date'], errors='coerce')
+        df = df.dropna(subset=['date'])
+        if df.empty:
+            return []
+
+        grouped = df.groupby([df['date'].dt.date, 'sentimen'], observed=False).size().unstack(fill_value=0)
+        for col in ['Positif', 'Netral', 'Negatif']:
+            if col not in grouped.columns:
+                grouped[col] = 0
+
+        result = []
+        for date_val, row in grouped.iterrows():
+            result.append({
+                "date": str(date_val),
+                "positive": int(row.get('Positif', 0)),
+                "neutral": int(row.get('Netral', 0)),
+                "negative": int(row.get('Negatif', 0)),
+            })
+        return result
+    except Exception as e:
+        logger.error(f"Error building timeline: {e}")
+        return []
+
+
 def get_top_items(df: pd.DataFrame, n: int = 100) -> list:
     if df.empty:
         return []

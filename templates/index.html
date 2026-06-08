@@ -865,6 +865,9 @@
 // =============================================================
 (function() {
 
+    // isPrecomputedView must be at IIFE scope so the analyze-btn handler can access it
+    let isPrecomputedView = false;
+
     // --- Cek status model saat load ---
     fetch('/api/health').then(r => r.json()).then(d => {
         // Ubah teks tombol dark_mode menjadi status model (elemen nav sudah ada)
@@ -1083,7 +1086,7 @@
 
         // Setup button toggles
         const toggleViewBtn = document.getElementById('toggle-view-btn');
-        let isPrecomputedView = false;
+        // isPrecomputedView is declared in the outer IIFE scope — do not redeclare here
         
         if(toggleViewBtn) {
             toggleViewBtn.addEventListener('click', () => {

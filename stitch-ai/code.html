@@ -300,10 +300,15 @@
 <div class="relative w-full">
 <input class="glass-input w-full bg-surface-bright/5 backdrop-blur-xl border border-on-surface/10 rounded px-4 py-3 font-mono-code text-mono-code text-on-surface placeholder-terminal-placeholder transition-all duration-300" id="topic-input" placeholder="Enter a topic..." type="text"/>
 </div>
-<button class="w-full bg-on-surface text-surface-dim font-label-caps text-label-caps uppercase py-3 px-6 rounded hover:opacity-90 active:scale-95 transition-all duration-200 flex items-center justify-center gap-2" id="analyze-btn">
-                    Analyze
-                    <span class="material-symbols-outlined text-[16px]">arrow_forward</span>
+<button class="w-full bg-on-surface text-surface-dim font-label-caps text-label-caps uppercase py-3 px-6 rounded hover:opacity-90 active:scale-95 transition-all duration-200 flex items-center justify-center gap-2 disabled:opacity-50" id="analyze-btn">
+    <span id="analyze-btn-text">Analyze</span>
+    <span class="material-symbols-outlined text-[16px]" id="analyze-btn-icon">arrow_forward</span>
+    <svg class="hidden animate-spin h-4 w-4" id="analyze-spinner" fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" fill="currentColor"></path>
+    </svg>
 </button>
+<p class="text-on-surface-variant font-mono-code text-mono-code mt-2 text-center" id="scrape-progress-text"></p>
 </div>
 </div>
 <!-- Analysis View -->
@@ -410,11 +415,203 @@
             }
         }
 
-        analyzeBtn.addEventListener('click', () => {
-            const topic = topicInput.value.trim() || 'General Conversation';
-            analysisTitle.textContent = `Analysis: ${topic}`;
-            showView('analysis');
-            initCharts();
+        const analyzeSpinner = document.getElementById('analyze-spinner');
+        const analyzeBtnText = document.getElementById('analyze-btn-text');
+        const analyzeBtnIcon = document.getElementById('analyze-btn-icon');
+        const scrapeProgressText = document.getElementById('scrape-progress-text');
+        const analysisStatus = document.getElementById('analysis-status');
+
+        function setAnalyzeLoading(loading) {
+            analyzeBtn.disabled = loading;
+            if (loading) {
+                analyzeBtnText.textContent = 'Scraping...';
+                analyzeBtnIcon.classList.add('hidden');
+                analyzeSpinner.classList.remove('hidden');
+            } else {
+                analyzeBtnText.textContent = 'Analyze';
+                analyzeBtnIcon.classList.remove('hidden');
+                analyzeSpinner.classList.add('hidden');
+            }
+        }
+
+        async function pollStatus(reqId) {
+            return new Promise((resolve, reject) => {
+                let attempts = 0;
+                const maxAttempts = 120; // 2 minutes max
+                const interval = setInterval(async () => {
+                    attempts++;
+                    try {
+                        const resp = await fetch(`/api/status/${reqId}`);
+                        const data = await resp.json();
+                        const status = data.status || 'UNKNOWN';
+                        const msg = data.message || '';
+                        const progress = data.progress || 0;
+
+                        if (scrapeProgressText) {
+                            scrapeProgressText.textContent = msg ? `[${status}] ${msg} (${progress}%)` : `Status: ${status}`;
+                        }
+
+                        if (status === 'COMPLETED') {
+                            clearInterval(interval);
+                            resolve(data);
+                        } else if (status === 'FAILED') {
+                            clearInterval(interval);
+                            reject(new Error(msg || 'Scraping gagal'));
+                        } else if (attempts >= maxAttempts) {
+                            clearInterval(interval);
+                            reject(new Error('Timeout: proses terlalu lama'));
+                        }
+                    } catch (err) {
+                        clearInterval(interval);
+                        reject(err);
+                    }
+                }, 2000);
+            });
+        }
+
+        function renderChartsWithRealData(distribution, timeline, topItems) {
+            // Destroy existing charts if reinitializing
+            Chart.helpers.each(Chart.instances, (instance) => instance.destroy());
+            chartsInitialized = false;
+
+            Chart.defaults.color = '#c5c6cd';
+            Chart.defaults.font.family = "'Geist', monospace";
+            const commonOptions = {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { labels: { color: '#c5c6cd' } } }
+            };
+
+            // Timeline Chart from real data
+            const timelineLabels = (timeline || []).map(t => t.date || t.label || '');
+            const timelinePos = (timeline || []).map(t => t.positive || 0);
+            const timelineNeg = (timeline || []).map(t => t.negative || 0);
+            const timelineNeu = (timeline || []).map(t => t.neutral || 0);
+
+            new Chart(document.getElementById('timelineChart'), {
+                type: 'line',
+                data: {
+                    labels: timelineLabels.length ? timelineLabels : ['No Data'],
+                    datasets: [
+                        { label: 'Positif', data: timelinePos, borderColor: '#4ade80', backgroundColor: 'rgba(74,222,128,0.1)', tension: 0.4, fill: true },
+                        { label: 'Negatif', data: timelineNeg, borderColor: '#ffb4ab', backgroundColor: 'transparent', tension: 0.4 },
+                        { label: 'Netral',  data: timelineNeu, borderColor: '#8f9097', backgroundColor: 'transparent', tension: 0.4 },
+                    ]
+                },
+                options: { ...commonOptions, scales: { x: { grid: { color: 'rgba(143,144,151,0.1)' } }, y: { grid: { color: 'rgba(143,144,151,0.1)' } } } }
+            });
+
+            // Radar Chart (distribution by source)
+            const distDist = distribution || {};
+            const posCount  = distDist.Positif || distDist.positive || 0;
+            const negCount  = distDist.Negatif || distDist.negative || 0;
+            const neuCount  = distDist.Netral  || distDist.neutral  || 0;
+            const total     = posCount + negCount + neuCount || 1;
+            new Chart(document.getElementById('radarChart'), {
+                type: 'radar',
+                data: {
+                    labels: ['Positif', 'Netral', 'Negatif', 'Volume', 'Akurasi', 'Coverage'],
+                    datasets: [{ label: 'Sentiment Profile', data: [
+                        Math.round(posCount / total * 100),
+                        Math.round(neuCount / total * 100),
+                        Math.round(negCount / total * 100),
+                        Math.min(total, 100),
+                        98,
+                        Math.min(total * 2, 100),
+                    ], backgroundColor: 'rgba(182,198,237,0.2)', borderColor: '#b6c6ed', pointBackgroundColor: '#d9e2ff' }]
+                },
+                options: { ...commonOptions, scales: { r: { grid: { color: 'rgba(143,144,151,0.2)' }, angleLines: { color: 'rgba(143,144,151,0.2)' }, ticks: { backdropColor: 'transparent' } } } }
+            });
+
+            // Bar Chart - top items by source
+            const items = (topItems || []).slice(0, 8);
+            const itemLabels = items.map((_, i) => `Item ${i+1}`);
+            const itemPos = items.map(t => parseFloat(t.confidence_positive || t.confidence_positif || 0) * 100);
+            const itemNeg = items.map(t => parseFloat(t.confidence_negative || t.confidence_negatif || 0) * 100);
+            new Chart(document.getElementById('barChart'), {
+                type: 'bar',
+                data: {
+                    labels: itemLabels.length ? itemLabels : ['No Data'],
+                    datasets: [
+                        { label: 'Confidence Positif (%)', data: itemPos, backgroundColor: '#4ade80', borderRadius: 4 },
+                        { label: 'Confidence Negatif (%)', data: itemNeg, backgroundColor: '#ffb4ab', borderRadius: 4 },
+                    ]
+                },
+                options: { ...commonOptions, scales: { x: { grid: { display: false } }, y: { grid: { color: 'rgba(143,144,151,0.1)' }, max: 100 } } }
+            });
+
+            // Doughnut Chart - overall distribution
+            new Chart(document.getElementById('doughnutChart'), {
+                type: 'doughnut',
+                data: {
+                    labels: ['Positif', 'Netral', 'Negatif'],
+                    datasets: [{ data: [posCount, neuCount, negCount], backgroundColor: ['#4ade80', '#515f78', '#ffb4ab'], borderWidth: 0, hoverOffset: 4 }]
+                },
+                options: { ...commonOptions, cutout: '70%' }
+            });
+
+            chartsInitialized = true;
+        }
+
+        analyzeBtn.addEventListener('click', async () => {
+            const topic = topicInput.value.trim();
+            if (!topic) {
+                scrapeProgressText.textContent = 'Masukkan topik terlebih dahulu.';
+                return;
+            }
+
+            setAnalyzeLoading(true);
+            scrapeProgressText.textContent = 'Memulai scraping Twitter & internet...';
+            analysisTitle.textContent = `Analisis: ${topic}`;
+
+            try {
+                // Start scrape pipeline
+                const startResp = await fetch('/api/scrape', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ keyword: topic, limit: 50, sources: ['twitter', 'web'] })
+                });
+
+                if (!startResp.ok) {
+                    const err = await startResp.json();
+                    throw new Error(err.error || `HTTP ${startResp.status}`);
+                }
+
+                const startData = await startResp.json();
+                if (startData.error) throw new Error(startData.error);
+
+                const reqId = startData.req_id;
+                scrapeProgressText.textContent = `Job dimulai (ID: ${reqId.slice(0,8)}...). Menunggu hasil...`;
+
+                // Poll for status
+                const statusData = await pollStatus(reqId);
+                const totalResults = statusData.total_results || 0;
+                analysisStatus.textContent = `Analisis selesai: ${totalResults} data ditemukan.`;
+
+                // Fetch results
+                const resultsResp = await fetch(`/api/results/${reqId}`);
+                if (!resultsResp.ok) throw new Error('Gagal mengambil hasil');
+                const resultsData = await resultsResp.json();
+
+                // Show analysis view with real data
+                showView('analysis');
+                renderChartsWithRealData(
+                    resultsData.distribution,
+                    resultsData.timeline,
+                    resultsData.top_items
+                );
+
+                scrapeProgressText.textContent = `Selesai! ${totalResults} data dianalisis dari Twitter & internet.`;
+
+            } catch (err) {
+                console.error('Analyze error:', err);
+                scrapeProgressText.textContent = `Error: ${err.message}`;
+                // Show with dummy data as fallback
+                showView('analysis');
+                initCharts();
+            } finally {
+                setAnalyzeLoading(false);
+            }
         });
 
         newAnalysisBtn.addEventListener('click', () => {

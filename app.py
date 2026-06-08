@@ -560,11 +560,11 @@ def api_scrape():
 
     # Quick ping to check if scraper is alive
     try:
-        httpx.get(f"{SCRAPER_BASE_URL}/docs", timeout=1.0)
-    except httpx.ConnectError:
-        return jsonify({"error": "Scraper tidak aktif (port 8000)."}), 503
-    except httpx.TimeoutException:
-        pass # ignore if it's just slow, pipeline handles it
+        httpx.get(f"{SCRAPER_BASE_URL}/health", timeout=2.0)
+    except (httpx.ConnectError, httpx.TimeoutException):
+        return jsonify({
+            "error": f"Layanan scraper tidak aktif. Pastikan server scraper berjalan di {SCRAPER_BASE_URL}."
+        }), 503
 
     from pipeline import start_scrape_pipeline
     try:
@@ -601,20 +601,54 @@ def api_precomputed():
 @app.route("/api/results/<req_id>", methods=["GET"])
 def api_results(req_id):
     from pipeline import get_status
-    import json
     status_data = get_status(req_id)
     if status_data.get("status") == "COMPLETED" and status_data.get("file_path"):
         import pandas as pd
-        df = pd.read_csv(status_data["file_path"])
         from utils import get_overall_distribution, get_timeline_data, get_top_items
         from config import MODEL_METRICS
+
+        file_path = status_data["file_path"]
+        try:
+            df = pd.read_csv(file_path)
+        except Exception as e:
+            logger.error(f"Failed to read CSV {file_path}: {e}")
+            return jsonify({"error": "Gagal membaca file hasil."}), 500
+
+        # Normalize column names: rename Indonesian to English for compatibility
+        col_map = {
+            "teks_asli": "raw_text",
+            "teks_bersih": "clean_text",
+            "sentimen": "sentimen",  # keep as-is for aggregation
+            "confidence_positif": "confidence_positive",
+            "confidence_negatif": "confidence_negative",
+            "confidence_netral": "confidence_neutral",
+        }
+        df_renamed = df.rename(columns={k: v for k, v in col_map.items() if k in df.columns})
+
+        # For aggregation functions, use original column names (they expect 'sentimen', 'confidence_positif', etc.)
+        top_items_raw = get_top_items(df, n=100)
+        # Remap keys in top_items for frontend
+        top_items = []
+        for item in top_items_raw:
+            top_items.append({
+                "raw_text": item.get("teks_asli", ""),
+                "source": item.get("source", ""),
+                "date": str(item.get("date", "")),
+                "predicted_label": item.get("sentimen", ""),
+                "confidence_positive": float(item.get("confidence_positif", item.get("confidence", 0))),
+                "confidence_negative": float(item.get("confidence_negatif", 0)),
+                "confidence_neutral": float(item.get("confidence_netral", 0)),
+            })
+
         return jsonify({
             "distribution": get_overall_distribution(df),
             "timeline": get_timeline_data(df),
-            "top_items": get_top_items(df, n=100),
-            "model_metrics": MODEL_METRICS
+            "top_items": top_items,
+            "model_metrics": MODEL_METRICS,
+            "total_results": status_data.get("total_results", len(df)),
         })
     return jsonify({"error": "Results not ready or not found."}), 404
+
 
 # Error Handlers (NFR-S-05)
 # =============================================================

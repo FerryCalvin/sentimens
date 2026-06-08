@@ -35,7 +35,7 @@ LABEL_COLORS = {
 }
 
 # --- FastAPI Scraper Config ---
-SCRAPER_BASE_URL = os.getenv("FASTAPI_URL", "http://127.0.0.1:8001")
+SCRAPER_BASE_URL = os.getenv("FASTAPI_URL", "http://127.0.0.1:8000")
 SCRAPER_ENDPOINT = "/scrape"
 SCRAPER_TIMEOUT = 60  # detik (FR-SC-07)
 DEFAULT_SCRAPE_LIMIT = 100

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Error {{ error_code }} — SentimenS</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            background: #0f1117;
+            color: #c5c6cd;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 2rem;
+        }
+        .error-code {
+            font-size: 8rem;
+            font-weight: 800;
+            line-height: 1;
+            background: linear-gradient(135deg, #d9e2ff 0%, #7c9bff 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 1rem;
+        }
+        .error-message {
+            font-size: 1.25rem;
+            color: #8f9097;
+            margin-bottom: 2.5rem;
+            max-width: 480px;
+        }
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1.75rem;
+            background: #1e2a4a;
+            border: 1px solid #2f3f6a;
+            border-radius: 8px;
+            color: #d9e2ff;
+            text-decoration: none;
+            font-weight: 600;
+            transition: background 0.2s, border-color 0.2s;
+        }
+        .btn:hover {
+            background: #2a3d6e;
+            border-color: #4a6aad;
+        }
+    </style>
+</head>
+<body>
+    <div class="error-code">{{ error_code }}</div>
+    <p class="error-message">{{ error_message }}</p>
+    <a href="/" class="btn">← Kembali ke Beranda</a>
+</body>
+</html>
