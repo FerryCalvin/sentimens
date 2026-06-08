@@ -539,7 +539,7 @@ def api_batch():
 
 @app.route("/api/scrape", methods=["POST"])
 def api_scrape():
-    """JSON endpoint live scraping — dipanggil SPA via fetch()."""
+    """JSON endpoint live scraping â€” dipanggil SPA via fetch(), menggunakan background task."""
     if not MODEL_LOADED:
         return jsonify({"error": "Model belum dimuat."}), 503
 
@@ -555,61 +555,67 @@ def api_scrape():
     except (ValueError, TypeError):
         limit = DEFAULT_SCRAPE_LIMIT
 
+    sources = body.get("sources", ["twitter"])
+    mode = body.get("mode", "live")
+
+    # Quick ping to check if scraper is alive
     try:
-        scraper_url = f"{SCRAPER_BASE_URL}{SCRAPER_ENDPOINT}"
-        response    = httpx.post(
-            scraper_url,
-            json={"keyword": keyword, "limit": limit},
-            timeout=SCRAPER_TIMEOUT,
-        )
-        response.raise_for_status()
-        scraper_data = response.json()
-
-        if scraper_data.get("status") != "success":
-            return jsonify({"error": scraper_data.get("message", "Scraping gagal.")}), 502
-
-        tweets = scraper_data.get("data", [])
-        if not tweets:
-            return jsonify({"error": f"Tidak ada data untuk '{keyword}'."}), 404
-
-        raw_texts   = [t.get("text", "") for t in tweets]
-        dates       = [t.get("date", "")  for t in tweets]
-        clean_texts = [preprocess_text(t)  for t in raw_texts]
-        predictions = predict_batch(clean_texts)
-
-        results = []
-        for raw, clean, date, pred in zip(raw_texts, clean_texts, dates, predictions):
-            results.append({
-                "raw_text":            raw,
-                "clean_text":          clean,
-                "date":                date,
-                "predicted_label":     pred.get("predicted_label", "Netral"),
-                "confidence_positive": pred.get("confidence_positive", 0.0),
-                "confidence_negative": pred.get("confidence_negative", 0.0),
-                "confidence_neutral":  pred.get("confidence_neutral",  0.0),
-                "inference_time_ms":   pred.get("inference_time_ms",   0.0),
-            })
-
-        summary    = calculate_summary(results)
-        csv_output = generate_csv_output(results)
-        return jsonify({
-            "results":       results[:100],
-            "total_results": len(results),
-            "keyword":       keyword,
-            "summary":       summary,
-            "csv_content":   csv_output,
-        })
-
+        httpx.get(f"{SCRAPER_BASE_URL}/docs", timeout=1.0)
     except httpx.ConnectError:
         return jsonify({"error": "Scraper tidak aktif (port 8000)."}), 503
     except httpx.TimeoutException:
-        return jsonify({"error": "Scraping timeout. Coba kurangi limit."}), 504
+        pass # ignore if it's just slow, pipeline handles it
+
+    from pipeline import start_scrape_pipeline
+    try:
+        req_id = start_scrape_pipeline(keyword, limit, sources, mode=mode)
+        return jsonify({"status": "ok", "req_id": req_id})
     except Exception as e:
-        logger.error(f"/api/scrape error: {e}", exc_info=True)
-        return jsonify({"error": "Terjadi kesalahan saat scraping."}), 500
+        logger.error(f"/api/scrape pipeline error: {e}", exc_info=True)
+        return jsonify({"error": "Terjadi kesalahan saat memulai scraping."}), 500
 
 
 # =============================================================
+@app.route("/api/status/<req_id>", methods=["GET"])
+def api_status(req_id):
+    from pipeline import get_status
+    status_data = get_status(req_id)
+    return jsonify(status_data)
+
+@app.route("/api/results/precomputed", methods=["GET"])
+def api_precomputed():
+    import os, pandas as pd
+    from utils import get_overall_distribution, get_timeline_data, get_top_items
+    file_path = os.path.join("data", "precomputed_large.csv")
+    if not os.path.exists(file_path):
+        return jsonify({"error": "Pre-computed data not found."}), 404
+    df = pd.read_csv(file_path)
+    from config import MODEL_METRICS
+    return jsonify({
+        "distribution": get_overall_distribution(df),
+        "timeline": get_timeline_data(df),
+        "top_items": get_top_items(df, n=100),
+        "model_metrics": MODEL_METRICS
+    })
+
+@app.route("/api/results/<req_id>", methods=["GET"])
+def api_results(req_id):
+    from pipeline import get_status
+    import json
+    status_data = get_status(req_id)
+    if status_data.get("status") == "COMPLETED" and status_data.get("file_path"):
+        import pandas as pd
+        df = pd.read_csv(status_data["file_path"])
+        from utils import get_overall_distribution, get_timeline_data, get_top_items
+        from config import MODEL_METRICS
+        return jsonify({
+            "distribution": get_overall_distribution(df),
+            "timeline": get_timeline_data(df),
+            "top_items": get_top_items(df, n=100),
+            "model_metrics": MODEL_METRICS
+        })
+    return jsonify({"error": "Results not ready or not found."}), 404
+
 # Error Handlers (NFR-S-05)
 # =============================================================
 

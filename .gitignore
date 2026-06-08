@@ -1,18 +1,14 @@
-# Lingkungan Virtual Python
+# Virtual Environments
 venv/
 env/
 __pycache__/
 *.py[cod]
 
-# Variabel Lingkungan (Sandi/Kunci API)
-.env
+# Secrets
+*.env
 
-# Model IndoBERT (SANGAT PENTING: Jangan di-upload ke Git!)
-model_final_siap_pakai/
-*.bin
-*.pt
-*.h5
-*.safetensors
+# Models
+models/
 
-# Dataset CSV
-*.csv
+# Data
+data/*.csv

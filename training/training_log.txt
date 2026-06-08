@@ -1,0 +1,23 @@
+2026-06-08 12:13:43,389 [INFO] Memuat data test dari: data/test_data.csv
+2026-06-08 12:13:43,411 [INFO] Data test: 210 sampel
+2026-06-08 12:13:43,411 [INFO] Memuat model dari: models
+2026-06-08 12:14:02,283 [INFO] Memuat data test dari: data/test_data.csv
+2026-06-08 12:14:02,287 [INFO] Data test: 210 sampel
+2026-06-08 12:14:02,287 [INFO] Memuat model dari: models
+2026-06-08 12:14:03,045 [INFO] Device: cpu
+2026-06-08 12:14:03,047 [INFO] Jumlah parameter: 124,443,651
+2026-06-08 12:14:03,051 [INFO] Menjalankan evaluasi pada 210 sampel...
+2026-06-08 12:15:52,244 [INFO] 
+============================================================
+2026-06-08 12:15:52,246 [INFO] LAPORAN EVALUASI MODEL INDOBERT
+2026-06-08 12:15:52,246 [INFO] ============================================================
+2026-06-08 12:15:52,306 [INFO]   Kelas       Precision     Recall   F1-Score    Support
+2026-06-08 12:15:52,306 [INFO]   --------------------------------------------------
+2026-06-08 12:15:52,306 [INFO]   Negatif       100.00%    100.00%    100.00%         70
+2026-06-08 12:15:52,307 [INFO]   Netral        100.00%    100.00%    100.00%         69
+2026-06-08 12:15:52,307 [INFO]   Positif       100.00%    100.00%    100.00%         71
+2026-06-08 12:15:52,308 [INFO]   (Baris = Label Aktual, Kolom = Label Prediksi)
+2026-06-08 12:15:52,308 [INFO]              Pred Negatif  Pred Netral Pred Positif
+2026-06-08 12:15:52,308 [INFO]   Aktual Negatif           70            0            0
+2026-06-08 12:15:52,308 [INFO]   Aktual Netral            0           69            0
+2026-06-08 12:15:52,308 [INFO]   Aktual Positif            0            0           71

@@ -1,188 +1,61 @@
-# ============================================================
-# scraper/main.py — FastAPI Scraper Microservice (Port 8000)
-# Mengimplementasikan FR-SC-01, FR-SC-02, FR-SC-03
-# ============================================================
-import asyncio
-import logging
-import os
 from contextlib import asynccontextmanager
-
 from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, field_validator
+import asyncio
 
-from scraper import run_scrape
+from scraper.models import ScrapeRequest
+from scraper.twitter import scrape_twitter
+from scraper.news import scrape_news
 
-# ---- Logging ----
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
-logger = logging.getLogger(__name__)
-
-
-# ---- Pydantic Models (FR-SC-01) ----
-class ScrapeRequest(BaseModel):
-    """Request model untuk endpoint POST /scrape."""
-    keyword: str = Field(..., min_length=1, max_length=200, description="Kata kunci pencarian")
-    limit: int = Field(default=100, ge=10, le=500, description="Jumlah data yang diminta")
-
-    @field_validator("keyword")
-    @classmethod
-    def keyword_must_not_be_empty(cls, v):
-        if not v.strip():
-            raise ValueError("Kata kunci tidak boleh hanya spasi")
-        return v.strip()
-
-
-class TweetItem(BaseModel):
-    """Model untuk satu item hasil scraping."""
-    text: str
-    date: str
-
-
-class ScrapeResponse(BaseModel):
-    """Response model untuk endpoint POST /scrape (FR-SC-02)."""
-    status: str
-    count: int
-    data: list[TweetItem]
-    message: str = ""
-
-
-# ---- FastAPI App ----
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Lifecycle manager untuk startup/shutdown."""
-    logger.info("FastAPI Scraper Service dimulai — Port 8000")
+    # Startup logic
+    print("Starting Sentiments Scraper API...")
+    yield
+    # Shutdown logic
+    print("Shutting down Sentiments Scraper API...")
+
+app = FastAPI(title="Sentiments Scraper API", lifespan=lifespan)
+
+@app.post("/scrape")
+async def scrape(payload: ScrapeRequest):
     try:
-        yield
-    except asyncio.CancelledError:
-        # Graceful shutdown saat CTRL+C — tidak perlu raise ulang
-        pass
-    finally:
-        logger.info("FastAPI Scraper Service dihentikan")
-
-
-app = FastAPI(
-    title="SentimenID Scraper Service",
-    description="Microservice untuk scraping konten dari platform media sosial dan web.",
-    version="1.0.0",
-    lifespan=lifespan,
-    docs_url="/docs",
-    redoc_url="/redoc",
-)
-
-# CORS — Hanya izinkan dari localhost Flask (NFR-S-04)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5000",
-        "http://127.0.0.1:5000",
-    ],
-    allow_credentials=True,
-    allow_methods=["POST", "GET"],
-    allow_headers=["*"],
-)
-
-
-# ============================================================
-# ENDPOINT: POST /scrape (FR-SC-01, FR-SC-02, FR-SC-03)
-# ============================================================
-
-@app.post("/scrape", response_model=ScrapeResponse)
-async def scrape_endpoint(request: ScrapeRequest):
-    """
-    FR-SC-01: Endpoint scraping utama.
-    
-    Menerima kata kunci dan limit, kemudian menjalankan scraping
-    secara asinkronus menggunakan Playwright.
-    
-    Returns:
-        ScrapeResponse dengan data tweet dan status
-    """
-    logger.info(f"Menerima permintaan scraping: keyword='{request.keyword}', limit={request.limit}")
-    
-    try:
-        # FR-SC-03: Jalankan scraping secara asinkronus
-        result = await run_scrape(
-            keyword=request.keyword,
-            limit=request.limit,
-        )
+        tasks = []
+        # Calculate limit per source to not exceed overall limit
+        num_sources = len(payload.sources)
+        if num_sources == 0:
+            return {"status": "success", "keyword": payload.keyword, "total_results": 0, "data": []}
+            
+        limit_per_source = max(1, payload.limit // num_sources)
         
-        if result["status"] == "error":
-            raise HTTPException(
-                status_code=503,
-                detail=result.get("message", "Layanan scraping tidak tersedia"),
-            )
+        twitter_task = None
+        news_task = None
         
-        # Konversi ke response model
-        data_items = [
-            TweetItem(
-                text=item.get("text", ""),
-                date=item.get("date", ""),
-            )
-            for item in result["data"]
-            if item.get("text", "").strip()
-        ]
-        
-        logger.info(f"Scraping selesai: {len(data_items)} item berhasil")
-        
-        return ScrapeResponse(
-            status="success",
-            count=len(data_items),
-            data=data_items,
-        )
-        
-    except HTTPException:
-        raise
+        if "twitter" in payload.sources:
+            twitter_task = asyncio.create_task(scrape_twitter(payload.keyword, limit_per_source))
+        if "news" in payload.sources:
+            news_task = asyncio.create_task(scrape_news(payload.keyword, limit_per_source))
+            
+        results = []
+        if twitter_task:
+            twitter_data = await twitter_task
+            results.extend(twitter_data)
+        if news_task:
+            news_data = await news_task
+            results.extend(news_data)
+            
+        return {
+            "status": "success", 
+            "keyword": payload.keyword, 
+            "total_results": len(results), 
+            "data": results
+        }
     except Exception as e:
-        logger.error(f"Error tidak terduga pada endpoint /scrape: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail="Terjadi kesalahan internal pada layanan scraping.",
-        )
-
-
-# ============================================================
-# ENDPOINT: GET /health
-# ============================================================
+        print(f"Scraping error: {e}")
+        return {
+            "status": "error",
+            "message": f"Scraping failed: {str(e)}"
+        }
 
 @app.get("/health")
-async def health_check():
-    """Health check endpoint untuk verifikasi layanan aktif."""
-    return {
-        "status": "ok",
-        "service": "FastAPI Scraper Service",
-        "port": 8000,
-        "message": "Layanan scraping aktif dan siap menerima permintaan",
-    }
-
-
-@app.get("/")
-async def root():
-    """Root endpoint — redirect ke dokumentasi API."""
-    return {
-        "service": "SentimenID Scraper Microservice",
-        "version": "1.0.0",
-        "docs": "/docs",
-        "health": "/health",
-        "endpoints": {
-            "POST /scrape": "Endpoint utama untuk scraping konten",
-        }
-    }
-
-
-# ============================================================
-# Entry Point
-# ============================================================
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        "main:app",
-        host="127.0.0.1",  # NFR-S-04: Hanya localhost
-        port=8000,
-        reload=False,
-        workers=1,
-        log_level="info",
-    )
+async def health():
+    return {"status": "ok", "scrapers": ["twitter", "news"]}

@@ -33,7 +33,7 @@ from sklearn.metrics import (
     classification_report,
 )
 from torch.utils.data import DataLoader
-from transformers import BertForSequenceClassification, BertTokenizer
+from transformers import BertForSequenceClassification, AutoTokenizer
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -65,7 +65,7 @@ def evaluate_model(
     # ---- Load Model & Tokenizer ----
     logger.info(f"Memuat model dari: {model_path}")
     
-    tokenizer = BertTokenizer.from_pretrained(model_path)
+    tokenizer = AutoTokenizer.from_pretrained(model_path)
     model = BertForSequenceClassification.from_pretrained(model_path)
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

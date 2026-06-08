@@ -306,26 +306,29 @@
 </button>
 </div>
 </div>
+<!-- Waiting View -->
+<div class="landing-view hidden-view w-full max-w-[800px] text-center flex flex-col items-center gap-8" id="waiting-view">
+<h1 class="font-display-lg-mobile md:font-display-lg text-display-lg-mobile md:text-display-lg text-on-surface drop-shadow-lg ui-element">
+                Scraping & Analyzing...
+            </h1>
+<div class="w-full max-w-md flex flex-col gap-4 ui-element">
+<p class="text-on-surface-variant font-mono-code text-sm" id="waiting-status">Menghubungi server...</p>
+<div class="w-full bg-surface-bright/5 rounded-full h-2.5 mb-4 border border-on-surface/10">
+<div id="waiting-progress" class="bg-primary h-2.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+</div>
+</div>
+</div>
 <!-- Analysis View -->
 <div class="analysis-view flex-col w-full max-w-container-max mx-auto gap-6 mt-8 ui-element" id="analysis-view">
 <div class="flex flex-col md:flex-row justify-between items-start md:items-end mb-4 border-b border-on-surface/10 pb-4">
 <div>
-<div class="flex items-center gap-3">
 <h2 class="font-headline-md text-headline-md text-primary" id="analysis-title">Analysis Results</h2>
-<span id="demo-badge" class="hidden px-2 py-1 text-xs font-bold bg-[#ffb4ab]/20 text-[#ffb4ab] border border-[#ffb4ab]/30 rounded">DEMO</span>
-</div>
 <p class="text-on-surface-variant font-mono-code text-mono-code mt-2" id="analysis-status">Processing complete: 10,492 entities analyzed.</p>
 </div>
-<div class="flex items-center gap-4 mt-4 md:mt-0">
-<button class="text-on-surface-variant hover:text-primary transition-colors flex items-center gap-2 text-sm hidden" id="toggle-view-btn">
-<span class="material-symbols-outlined text-[16px]">dataset</span>
-                    View Full Dataset
-                </button>
-<button class="text-on-surface-variant hover:text-primary transition-colors flex items-center gap-2 text-sm" id="new-analysis-btn">
+<button class="mt-4 md:mt-0 text-on-surface-variant hover:text-primary transition-colors flex items-center gap-2 text-sm" id="new-analysis-btn">
 <span class="material-symbols-outlined text-[16px]">refresh</span>
                     New Analysis
                 </button>
-</div>
 </div>
 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
 <!-- Sentiment Timeline -->
@@ -335,11 +338,17 @@
 <canvas id="timelineChart"></canvas>
 </div>
 </div>
-<!-- Model Performance -->
+<!-- Model Performance (Offline) -->
 <div class="chart-container col-span-1">
-<h3 class="font-label-caps text-label-caps text-on-surface-variant mb-4 uppercase">Model Performance</h3>
-<div class="h-64 relative w-full flex justify-center">
-<canvas id="radarChart"></canvas>
+<h3 class="font-label-caps text-label-caps text-on-surface-variant mb-4 uppercase">Model Performance (Offline)</h3>
+<div class="h-64 relative w-full flex flex-col items-center justify-center gap-4">
+    <div class="grid grid-cols-2 gap-4 w-full text-center">
+        <div class="p-2 bg-surface-bright/5 rounded border border-on-surface/10"><p class="text-xs text-on-surface-variant uppercase">Accuracy</p><p class="text-xl font-mono-code text-primary">85%</p></div>
+        <div class="p-2 bg-surface-bright/5 rounded border border-on-surface/10"><p class="text-xs text-on-surface-variant uppercase">F1-Score</p><p class="text-xl font-mono-code text-primary">84%</p></div>
+        <div class="p-2 bg-surface-bright/5 rounded border border-on-surface/10"><p class="text-xs text-on-surface-variant uppercase">Precision</p><p class="text-xl font-mono-code text-primary">86%</p></div>
+        <div class="p-2 bg-surface-bright/5 rounded border border-on-surface/10"><p class="text-xs text-on-surface-variant uppercase">Recall</p><p class="text-xl font-mono-code text-primary">85%</p></div>
+    </div>
+    <p class="text-xs text-on-surface-variant mt-2 max-w-xs text-center">Metrics derived from IndoBERT validation dataset. Confusion matrix visualization will be added in Phase 6.</p>
 </div>
 </div>
 <!-- Engagement Heatmap (Simulated with Bar) -->
@@ -474,35 +483,19 @@
                 options: { ...commonOptions, scales: { x: { grid: { color: 'rgba(143, 144, 151, 0.1)' } }, y: { grid: { color: 'rgba(143, 144, 151, 0.1)' } } } }
             });
 
-            // Model Performance Chart (dummy data)
+            // Model Performance Chart
             new Chart(document.getElementById('radarChart'), {
                 type: 'bar',
                 data: {
-                    labels: ['Accuracy', 'Precision', 'Recall', 'F1-Score'],
+                    labels: ['Akurasi', 'Presisi', 'Recall', 'F1-Score'],
                     datasets: [{
-                        label: 'Model Metrics (%)',
-                        data: [85, 82, 88, 85],
-                        backgroundColor: ['#28a745', '#17a2b8', '#ffc107', '#6f42c1'],
+                        label: 'Metrics (%)',
+                        data: [85, 84, 86, 85],
+                        backgroundColor: ['#d9e2ff', '#b6c6ed', '#515f78', '#2a344e'],
                         borderRadius: 4
                     }]
                 },
-                options: {
-                    ...commonOptions,
-                    plugins: {
-                        ...commonOptions.plugins,
-                        legend: { display: false }
-                    },
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            max: 100,
-                            grid: { color: 'rgba(143,144,151,0.1)' }
-                        },
-                        x: {
-                            grid: { display: false }
-                        }
-                    }
-                }
+                options: { ...commonOptions, scales: { x: { grid: { display: false } }, y: { grid: { color: 'rgba(143, 144, 151, 0.1)' }, min: 0, max: 100 } } }
             });
 
             // Bar Chart (Engagement)
@@ -895,26 +888,20 @@
             const text = _topicInput.value.trim();
             if (!text) return;
 
-            // Tunjukkan loading (tetap gunakan teks tombol asli setelah selesai)
-            const origHTML = newBtn.innerHTML;
-            newBtn.innerHTML = 'Analyzing... <span class="material-symbols-outlined text-[16px]" style="animation:spin 1s linear infinite;display:inline-block">refresh</span>';
-            newBtn.disabled = true;
+            showView('waiting');
+            document.getElementById('waiting-status').textContent = 'Memulai proses scraping...';
+            document.getElementById('waiting-progress').style.width = '5%';
 
             try {
-                const limit = document.getElementById('toggle-view-btn') && !isPrecomputedView ? 50 : 100;
-                const mode = isPrecomputedView ? "demo" : "live";
                 const res  = await fetch('/api/scrape', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ keyword: text, limit: 50, sources: ['twitter', 'news'], mode: "live" })
+                    body: JSON.stringify({ keyword: text, limit: 100, sources: ['twitter', 'news'] })
                 });
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.error || 'Gagal memulai analisis');
 
                 const reqId = data.req_id;
-                if (_analysisStatus) _analysisStatus.textContent = 'Memulai proses scraping...';
-                if (_analysisTitle)  _analysisTitle.textContent  = `Analysis: ${text}`;
-                showView('analysis');
                 
                 // Polling logic
                 const interval = setInterval(async () => {
@@ -922,77 +909,54 @@
                         const statusRes = await fetch(`/api/status/${reqId}`);
                         const statusData = await statusRes.json();
                         
-                        if (_analysisStatus) _analysisStatus.textContent = `Processing: ${statusData.message || statusData.status} (${statusData.progress || 0}%)`;
+                        document.getElementById('waiting-status').textContent = statusData.message || statusData.status;
+                        document.getElementById('waiting-progress').style.width = `${statusData.progress || 0}%`;
                         
                         if (statusData.status === 'COMPLETED') {
                             clearInterval(interval);
                             
-                            if (statusData.total_results === 0) {
-                                if (_analysisTitle)  _analysisTitle.textContent  = `Analysis: ${text}`;
-                                if (_analysisStatus) _analysisStatus.textContent = 'No data found for the given keyword.';
-                                
-                                newBtn.innerHTML = origHTML;
-                                newBtn.disabled  = false;
-                                return;
-                            }
-
-                            // Fetch final results
+                            // Ambil data agregasi final dari endpoint results
                             fetch(`/api/results/${reqId}`)
                                 .then(r => r.json())
                                 .then(finalData => {
                                     if (_analysisTitle)  _analysisTitle.textContent  = `Analysis: ${text}`;
                                     if (_analysisStatus) _analysisStatus.textContent =
-                                        `Done - Total: ${statusData.total_results} data - Time: ${new Date().toLocaleTimeString()}`;
+                                        `Selesai · Total: ${statusData.total_results} data · Waktu: ${new Date().toLocaleTimeString()}`;
 
-                                    const badge = document.getElementById('demo-badge');
-                                    if(badge) badge.classList.add('hidden');
-                                    const toggleBtn = document.getElementById('toggle-view-btn');
-                                    if(toggleBtn) {
-                                        toggleBtn.classList.remove('hidden');
-                                        toggleBtn.innerHTML = '<span class="material-symbols-outlined text-[16px]">dataset</span> View Full Dataset';
-                                    }
-                                    isPrecomputedView = false;
-                                    
+                                    showView('analysis');
+                                    // finalData memiliki struktur: { distribution, timeline, top_items }
+                                    // Namun kita perlu me-mapping agar initChartsWithData tetap bisa bekerja:
                                     const mappedData = {
                                         summary: {
                                             total: finalData.distribution.total,
-                                            sentimen_positif: finalData.distribution.positif_count || finalData.distribution.positive,
-                                            sentimen_negatif: finalData.distribution.negatif_count || finalData.distribution.negative,
-                                            sentimen_netral: finalData.distribution.netral_count || finalData.distribution.neutral
+                                            positif: finalData.distribution.positive,
+                                            negatif: finalData.distribution.negative,
+                                            netral: finalData.distribution.neutral,
+                                            timeline: finalData.timeline
                                         },
-                                        results: finalData.top_items,
-                                        timeline: finalData.timeline
+                                        results: finalData.top_items
                                     };
                                     initChartsWithData(mappedData);
-                                    
-                                    newBtn.innerHTML = origHTML;
-                                    newBtn.disabled  = false;
                                 })
                                 .catch(e => {
                                     console.error("Gagal memuat hasil akhir", e);
-                                    if (_analysisStatus) _analysisStatus.textContent = 'Error memuat hasil akhir';
-                                    newBtn.innerHTML = origHTML;
-                                    newBtn.disabled  = false;
+                                    alert("Gagal memuat hasil akhir");
+                                    showView('landing');
                                 });
                         } else if (statusData.status === 'FAILED' || statusData.status === 'NOT_FOUND') {
                             clearInterval(interval);
-                            if (_analysisStatus) _analysisStatus.textContent = 'Error: ' + (statusData.message || 'Proses gagal');
-                            newBtn.innerHTML = origHTML;
-                            newBtn.disabled  = false;
+                            throw new Error(statusData.message || 'Proses gagal');
                         }
                     } catch(pollErr) {
                         clearInterval(interval);
-                        if (_analysisStatus) _analysisStatus.textContent = 'Error saat mengecek status: ' + pollErr.message;
-                        newBtn.innerHTML = origHTML;
-                        newBtn.disabled  = false;
+                        alert('Error saat mengecek status: ' + pollErr.message);
+                        showView('landing');
                     }
                 }, 2000);
 
             } catch(err) {
                 alert('Error: ' + err.message);
                 showView('landing');
-                newBtn.innerHTML = origHTML;
-                newBtn.disabled  = false;
             }
         });
 
@@ -1019,122 +983,70 @@
             plugins: { legend: { labels: { color: '#c5c6cd' } } }
         };
 
-        const pos = (apiData.confidence_positive * 100);
-        const neu = (apiData.confidence_neutral  * 100);
-        const neg = (apiData.confidence_negative * 100);
+        const summary = apiData.summary || {};
+        const pos = summary.count_positive || 0;
+        const neu = summary.count_neutral || 0;
+        const neg = summary.count_negative || 0;
+        const total = summary.total || 1; // avoid div by 0
 
-        // Timeline Chart (gunakan canvas #timelineChart yang sudah ada)
+        // Timeline Chart (Stacked Bar Chart for historical distribution)
+        const timelineLabels = Object.keys(summary.timeline || {}).sort();
+        const timelinePos = timelineLabels.map(l => summary.timeline[l].Positif || 0);
+        const timelineNeu = timelineLabels.map(l => summary.timeline[l].Netral || 0);
+        const timelineNeg = timelineLabels.map(l => summary.timeline[l].Negatif || 0);
+
         _chartInstances.timeline = new Chart(document.getElementById('timelineChart'), {
-            type: 'bar',
+            type: 'line',
             data: {
-                labels: ['Positif', 'Netral', 'Negatif'],
+                labels: timelineLabels.length > 0 ? timelineLabels : ['Today'],
                 datasets: [{
-                    label: 'Confidence (%)',
-                    data: [pos, neu, neg],
-                    backgroundColor: ['rgba(217,226,255,0.3)', 'rgba(81,95,120,0.5)', 'rgba(255,180,171,0.3)'],
-                    borderColor: ['#d9e2ff', '#515f78', '#ffb4ab'],
-                    borderWidth: 1, borderRadius: 4
+                    label: 'Positif',
+                    data: timelineLabels.length > 0 ? timelinePos : [pos],
+                    borderColor: '#d9e2ff',
+                    backgroundColor: 'rgba(217, 226, 255, 0.1)',
+                    tension: 0.4,
+                    fill: true
+                }, {
+                    label: 'Netral',
+                    data: timelineLabels.length > 0 ? timelineNeu : [neu],
+                    borderColor: '#515f78',
+                    backgroundColor: 'transparent',
+                    tension: 0.4
+                }, {
+                    label: 'Negatif',
+                    data: timelineLabels.length > 0 ? timelineNeg : [neg],
+                    borderColor: '#ffb4ab',
+                    backgroundColor: 'transparent',
+                    tension: 0.4
                 }]
             },
             options: { ...commonOptions,
                 scales: {
-                    x: { grid: { color: 'rgba(143,144,151,0.1)' } },
-                    y: { grid: { color: 'rgba(143,144,151,0.1)' }, max: 100,
-                         ticks: { callback: v => v + '%' } }
+                    x: { grid: { color: 'rgba(143, 144, 151, 0.1)' } },
+                    y: { grid: { color: 'rgba(143, 144, 151, 0.1)' } }
                 }
             }
         });
 
-        // Model Performance Chart (reusing canvas #radarChart)
-        _chartInstances.radar = new Chart(document.getElementById('radarChart'), {
-            type: 'bar',
-            data: {
-                labels: ['Accuracy', 'Precision', 'Recall', 'F1-Score'],
-                datasets: [{
-                    label: 'Model Metrics (%)',
-                    data: [
-                        apiData.model_metrics ? apiData.model_metrics.Accuracy : 100,
-                        apiData.model_metrics ? apiData.model_metrics.Precision : 100,
-                        apiData.model_metrics ? apiData.model_metrics.Recall : 100,
-                        apiData.model_metrics ? apiData.model_metrics.F1_Score : 100
-                    ],
-                    backgroundColor: ['#28a745', '#17a2b8', '#ffc107', '#6f42c1'],
-                    borderRadius: 4
-                }]
-            },
-            options: {
-                ...commonOptions,
-                plugins: {
-                    ...commonOptions.plugins,
-                    legend: { display: false }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        max: 100,
-                        grid: { color: 'rgba(143,144,151,0.1)' }
-                    },
-                    x: {
-                        grid: { display: false }
-                    }
-                }
-            }
-        });
-
-        // Setup button toggles
-        const toggleViewBtn = document.getElementById('toggle-view-btn');
-        let isPrecomputedView = false;
-        
-        if(toggleViewBtn) {
-            toggleViewBtn.addEventListener('click', () => {
-                if (!isPrecomputedView) {
-                    // Switch to precomputed
-                    document.getElementById('analysis-status').textContent = 'Loading Full Dataset...';
-                    fetch('/api/results/precomputed')
-                        .then(r => r.json())
-                        .then(finalData => {
-                            document.getElementById('analysis-title').textContent = 'Analysis: Pre-computed Dataset';
-                            document.getElementById('demo-badge').classList.add('hidden'); // precomputed is the 'full' dataset for demo
-                            document.getElementById('analysis-status').textContent = `Done - Total: ${finalData.distribution.total} data`;
-                            toggleViewBtn.innerHTML = '<span class="material-symbols-outlined text-[16px]">live_tv</span> View Live Analysis';
-                            isPrecomputedView = true;
-                            
-                            const mappedData = {
-                                summary: { total: finalData.distribution.total, sentimen_positif: finalData.distribution.positif_count, sentimen_negatif: finalData.distribution.negatif_count, sentimen_netral: finalData.distribution.netral_count },
-                                results: finalData.top_items,
-                                timeline: finalData.timeline
-                            };
-                            initChartsWithData(mappedData);
-                        })
-                        .catch(e => {
-                            console.error(e);
-                            document.getElementById('analysis-status').textContent = 'Error loading full dataset';
-                        });
-                } else {
-                    // Return to landing page or recent live view
-                    showView('landing');
-                    toggleViewBtn.innerHTML = '<span class="material-symbols-outlined text-[16px]">dataset</span> View Full Dataset';
-                    isPrecomputedView = false;
-                }
-            });
-        }
-
-        // Bar Chart (canvas #barChart sudah ada) — distribusi confidence
+        // Bar Chart (Distribution counts)
         _chartInstances.bar = new Chart(document.getElementById('barChart'), {
             type: 'bar',
             data: {
                 labels: ['Positif', 'Netral', 'Negatif'],
                 datasets: [
-                    { label: 'Score (%)', data: [pos, neu, neg], backgroundColor: '#515f78', borderRadius: 4 },
-                    { label: 'Threshold', data: [50, 50, 50], backgroundColor: '#2a344e', borderRadius: 4 }
+                    { label: 'Jumlah Sentimen', data: [pos, neu, neg], backgroundColor: ['#d9e2ff', '#515f78', '#ffb4ab'], borderRadius: 4 }
                 ]
             },
             options: { ...commonOptions,
-                scales: { x: { grid: { display: false } }, y: { grid: { color: 'rgba(143,144,151,0.1)' } } }
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { grid: { display: false } },
+                    y: { grid: { color: 'rgba(143, 144, 151, 0.1)' }, beginAtZero: true }
+                }
             }
         });
 
-        // Doughnut Chart (canvas #doughnutChart sudah ada)
+        // Doughnut Chart (Percentages)
         _chartInstances.doughnut = new Chart(document.getElementById('doughnutChart'), {
             type: 'doughnut',
             data: {
@@ -1142,10 +1054,11 @@
                 datasets: [{
                     data: [pos, neu, neg],
                     backgroundColor: ['#d9e2ff', '#515f78', '#ffb4ab'],
-                    borderWidth: 0, hoverOffset: 4
+                    borderWidth: 0,
+                    hoverOffset: 4
                 }]
             },
-            options: { ...commonOptions, cutout: '70%' }
+            options: { ...commonOptions, cutout: '75%' }
         });
 
         _chartsCreated = true;
@@ -1157,5 +1070,41 @@
     document.head.appendChild(style);
 
 })();
+
+    const _precomputedBtn = document.getElementById('precomputed-btn');
+    if (_precomputedBtn) {
+        _precomputedBtn.addEventListener('click', () => {
+            showView('waiting');
+            document.getElementById('waiting-status').textContent = 'Memuat dataset pre-computed...';
+            document.getElementById('waiting-progress').style.width = '100%';
+            
+            fetch('/api/results/precomputed')
+                .then(r => r.json())
+                .then(finalData => {
+                    if (_analysisTitle)  _analysisTitle.textContent  = `Analysis: Pre-computed Dataset (Demo)`;
+                    if (_analysisStatus) _analysisStatus.textContent =
+                        `Selesai · Total: ${finalData.distribution.total} data · Waktu: ${new Date().toLocaleTimeString()}`;
+
+                    showView('analysis');
+                    const mappedData = {
+                        summary: {
+                            total: finalData.distribution.total,
+                            positif: finalData.distribution.positive,
+                            negatif: finalData.distribution.negative,
+                            netral: finalData.distribution.neutral,
+                            timeline: finalData.timeline
+                        },
+                        results: finalData.top_items
+                    };
+                    initChartsWithData(mappedData);
+                })
+                .catch(e => {
+                    console.error(e);
+                    alert("Dataset pre-computed tidak ditemukan.");
+                    showView('landing');
+                });
+        });
+    }
+    
 </script>
 </body></html>

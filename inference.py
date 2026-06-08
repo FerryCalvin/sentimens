@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 
 import torch
-from transformers import BertForSequenceClassification, BertTokenizer
+from transformers import BertForSequenceClassification, AutoTokenizer
 
 from config import (
     MODEL_PATH,
@@ -20,11 +20,11 @@ logger = logging.getLogger(__name__)
 
 # ---- Global model instance (dimuat sekali saat startup) ----
 _model: BertForSequenceClassification | None = None
-_tokenizer: BertTokenizer | None = None
+_tokenizer = None
 _device: torch.device = torch.device("cpu")
 
 
-def load_model() -> tuple[BertForSequenceClassification, BertTokenizer]:
+def load_model():
     """
     FR-AI-01: Muat model dan tokenizer ke RAM pada saat startup.
     Model dimuat SEKALI dan disimpan sebagai global variable.
@@ -50,7 +50,7 @@ def load_model() -> tuple[BertForSequenceClassification, BertTokenizer]:
         )
     
     logger.info(f"Memuat tokenizer dari: {TOKENIZER_PATH}")
-    _tokenizer = BertTokenizer.from_pretrained(TOKENIZER_PATH)
+    _tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_PATH)
     
     logger.info(f"Memuat model dari: {MODEL_PATH}")
     _model = BertForSequenceClassification.from_pretrained(MODEL_PATH)
@@ -68,7 +68,7 @@ def load_model() -> tuple[BertForSequenceClassification, BertTokenizer]:
     return _model, _tokenizer
 
 
-def get_model() -> tuple[BertForSequenceClassification, BertTokenizer]:
+def get_model():
     """
     Dapatkan instance model yang sudah dimuat.
     Memanggil load_model() jika belum dimuat.
