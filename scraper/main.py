@@ -2,9 +2,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 import asyncio
 
-from scraper.models import ScrapeRequest
-from scraper.twitter import scrape_twitter
-from scraper.news import scrape_news
+from models import ScrapeRequest
+from twitter import scrape_twitter
+from news import scrape_news
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -59,3 +59,7 @@ async def scrape(payload: ScrapeRequest):
 @app.get("/health")
 async def health():
     return {"status": "ok", "scrapers": ["twitter", "news"]}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
