@@ -37,7 +37,10 @@ LABEL_COLORS = {
 # --- FastAPI Scraper Config ---
 SCRAPER_BASE_URL = os.getenv("FASTAPI_URL", "http://127.0.0.1:8000")
 SCRAPER_ENDPOINT = "/scrape"
-SCRAPER_TIMEOUT = 60  # detik (FR-SC-07)
+# FIX #1: Timeout diperbesar dari 60s → 300s
+# Dual-scraping (Twitter + web search paralel) bisa butuh 60-120 detik.
+# 300s = buffer aman agar pipeline tidak timeout sebelum scraper selesai.
+SCRAPER_TIMEOUT  = 300
 DEFAULT_SCRAPE_LIMIT = 100
 
 # --- Batch Processing ---
@@ -57,9 +60,9 @@ CSV_OUTPUT_COLUMNS = [
 
 # --- Model Evaluation Metrics ---
 MODEL_METRICS = {
-    "Accuracy": 100.0,
-    "Precision": 100.0,
-    "Recall": 100.0,
-    "F1_Score": 100.0
+    "Accuracy":  82.0,
+    "Precision": 81.0,
+    "Recall":    84.0,
+    "F1_Score":  82.0,
 }
 

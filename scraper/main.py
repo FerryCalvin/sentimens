@@ -1,88 +1,189 @@
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+"""
+main.py — Scraper API (Flask)
+==============================
+Arsitektur:
+  - Twitter/X  : sumber UTAMA  (target: semua limit dari Twitter)
+  - Web search : ENRICHMENT    (paralel, mengisi sisa jika Twitter kurang)
+
+Keduanya berjalan BERSAMAAN (concurrent via asyncio.gather),
+sehingga web search tidak menunggu Twitter selesai.
+"""
+from flask import Flask, jsonify, request
 import asyncio
 import logging
+import sys
+import os
 
-from models import ScrapeRequest
-from twitter import scrape_twitter
-from web_search import scrape_web_search
+sys.path.insert(0, os.path.dirname(__file__))
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    print("Starting Sentiments Scraper API...")
-    yield
-    print("Shutting down Sentiments Scraper API...")
-
-app = FastAPI(title="Sentiments Scraper API", lifespan=lifespan)
+app = Flask(__name__)
 
 
-@app.post("/scrape")
-async def scrape(payload: ScrapeRequest):
+def run_async(coro):
+    """Jalankan coroutine async dari thread synchronous Flask."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
+async def _scrape_parallel(keyword: str, twitter_limit: int, web_limit: int, sources: list) -> dict:
+    """
+    Jalankan Twitter + web search secara PARALEL menggunakan asyncio.gather.
+
+    Twitter adalah sumber utama — mendapat jatah penuh (twitter_limit).
+    Web search berjalan bersamaan sebagai enrichment (web_limit).
+    """
+    from twitter import scrape_twitter
+    from web_search import scrape_web_search
+
+    tasks = []
+    labels = []
+
+    if "twitter" in sources:
+        enriched_kw = f"{keyword} pendapat komentar opini"
+        tasks.append(scrape_twitter(keyword, twitter_limit))
+        labels.append("twitter")
+
+    if "web" in sources or "news" in sources:
+        tasks.append(scrape_web_search(keyword, web_limit))
+        labels.append("web")
+
+    if not tasks:
+        return {"twitter": [], "web": []}
+
+    # Jalankan semua task bersamaan
+    results_list = await asyncio.gather(*tasks, return_exceptions=True)
+
+    output = {"twitter": [], "web": []}
+    for label, result in zip(labels, results_list):
+        if isinstance(result, Exception):
+            logger.error(f"Error scraping {label}: {result}")
+            output[label] = []
+        else:
+            output[label] = result or []
+            logger.info(f"{label}: {len(output[label])} hasil")
+
+    return output
+
+
+@app.route("/health", methods=["GET"])
+def health():
+    from pathlib import Path
+    import json
+    scraper_dir = Path(__file__).parent
+
+    # Cek cookies_config.json (metode baru — cookie injection)
+    cookies_file = scraper_dir / "cookies_config.json"
+    cookies_ok = False
+    if cookies_file.exists():
+        try:
+            c = json.loads(cookies_file.read_text())
+            cookies_ok = bool(c.get("auth_token") or c.get("ct0"))
+        except Exception:
+            pass
+
+    # Cek session lama sebagai fallback
+    session_exists = (scraper_dir / "twitter_session.json").exists()
+
+    if cookies_ok:
+        tw_status = "cookie aktif (inject langsung)"
+    elif session_exists:
+        tw_status = "session aktif (lama)"
+    else:
+        tw_status = "tidak ada — jalankan: python export_twitter_cookies.py"
+
+    return jsonify({
+        "status": "ok",
+        "scrapers": ["twitter", "web"],
+        "twitter_auth": tw_status,
+    })
+
+
+@app.route("/scrape", methods=["POST"])
+def scrape():
     """
     Endpoint scraping utama.
-    Sources yang didukung: 'twitter', 'web'
+
+    Body JSON:
+        keyword  : str   — kata kunci wajib
+        limit    : int   — total data target (default 100)
+        sources  : list  — ["twitter", "web"] (default keduanya)
     """
     try:
-        num_sources = len(payload.sources)
-        if num_sources == 0:
-            return {
-                "status": "success",
-                "keyword": payload.keyword,
-                "total_results": 0,
-                "data": []
-            }
+        data = request.get_json()
+        if not data:
+            return jsonify({"status": "error", "message": "No JSON body"}), 400
 
-        limit_per_source = max(1, payload.limit // num_sources)
+        keyword = data.get("keyword", "").strip()
+        limit   = int(data.get("limit", 100))
+        sources = data.get("sources", ["twitter", "web"])
 
-        tasks = []
-        source_labels = []
+        if not keyword:
+            return jsonify({"status": "error", "message": "keyword required"}), 400
 
-        if "twitter" in payload.sources:
-            tasks.append(asyncio.create_task(
-                scrape_twitter(payload.keyword, limit_per_source)
-            ))
-            source_labels.append("twitter")
+        limit = max(10, min(limit, 500))
 
-        # Dukung "web" dan "news" (keduanya pakai web_search)
-        if "web" in payload.sources or "news" in payload.sources:
-            tasks.append(asyncio.create_task(
-                scrape_web_search(payload.keyword, limit_per_source)
-            ))
-            source_labels.append("web")
+        # ── Bagi jatah ─────────────────────────────────────────────────
+        # Twitter mendapat 100% dari limit sebagai sumber utama.
+        # Web search berjalan paralel dan memberikan enrichment
+        # (hasilnya digabung, lalu dipotong ke limit).
+        twitter_limit = limit                       # sumber utama: dapat semua
+        web_limit     = max(20, limit // 3)         # enrichment: ~1/3 dari limit
 
-        # Jalankan semua task secara paralel
-        task_results = await asyncio.gather(*tasks, return_exceptions=True)
+        logger.info(
+            f"Scraping paralel | keyword='{keyword}' | "
+            f"target={limit} | twitter={twitter_limit} | web={web_limit}"
+        )
 
-        results = []
-        for label, task_result in zip(source_labels, task_results):
-            if isinstance(task_result, Exception):
-                logger.error(f"Error scraping {label}: {task_result}")
-                continue
-            results.extend(task_result)
+        # Jalankan paralel
+        scraped = run_async(_scrape_parallel(keyword, twitter_limit, web_limit, sources))
 
-        return {
-            "status": "success",
-            "keyword": payload.keyword,
-            "total_results": len(results),
-            "data": results
-        }
+        twitter_results = scraped.get("twitter", [])
+        web_results     = scraped.get("web", [])
+
+        # ── Gabungkan: Twitter dulu, web sebagai pelengkap ──────────────
+        combined = list(twitter_results)
+
+        # Tambahkan web hanya jika Twitter kurang dari limit
+        existing_texts = {r.get("raw_text", "")[:80] for r in combined}
+        for item in web_results:
+            if len(combined) >= limit:
+                break
+            key = item.get("raw_text", "")[:80]
+            if key and key not in existing_texts:
+                existing_texts.add(key)
+                combined.append(item)
+
+        logger.info(
+            f"Total gabungan: {len(combined)} "
+            f"(Twitter: {len(twitter_results)}, Web: {len(web_results)})"
+        )
+
+        return jsonify({
+            "status":        "success",
+            "keyword":       keyword,
+            "count":         len(combined),
+            "total_results": len(combined),
+            "twitter_count": len(twitter_results),
+            "web_count":     len(web_results),
+            "data":          combined,
+        })
 
     except Exception as e:
         logger.error(f"Scraping error: {e}", exc_info=True)
-        return {
-            "status": "error",
-            "message": f"Scraping failed: {str(e)}"
-        }
-
-
-@app.get("/health")
-async def health():
-    return {"status": "ok", "scrapers": ["twitter", "web"]}
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=False)
+    print("Starting SentimenS Scraper API on port 8000...")
+    print("Twitter + Web berjalan PARALEL untuk hasil maksimal.")
+    app.run(host="127.0.0.1", port=8000, debug=False, threaded=True)

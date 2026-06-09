@@ -2,6 +2,7 @@ import threading
 import uuid
 import httpx
 import logging
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -45,6 +46,89 @@ def get_status(req_id: str) -> dict:
     with _status_lock:
         return _status_store.get(req_id, {"status": "NOT_FOUND"})
 
+
+def _scrape_via_subprocess(keyword: str, limit: int) -> list:
+    """
+    Jalankan scraper_worker.py sebagai subprocess terpisah.
+    Playwright butuh proses clean — tidak bisa spawn dari Flask thread.
+
+    FIX #2 — Windows Encoding:
+      Tambahkan encoding='utf-8' + errors='replace' agar tidak crash
+      saat output mengandung emoji atau karakter non-cp1252 (byte 0x9d, dll.)
+    """
+    import subprocess
+    import sys
+    import os
+    import json as _json
+
+    worker = os.path.join(os.path.dirname(__file__), "scraper_worker.py")
+    python = sys.executable
+
+    # Set PYTHONIOENCODING via env agar child process juga pakai UTF-8
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"]       = "1"   # Python 3.7+ UTF-8 mode
+
+    try:
+        result = subprocess.run(
+            [python, worker, keyword, str(limit)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",    # FIX #2: paksa UTF-8, bukan cp1252
+            errors="replace",    # FIX #2: karakter invalid diganti '?', tidak crash
+            timeout=300,         # FIX #1: diperpanjang dari 90s → 300s
+            cwd=os.path.dirname(__file__),
+            env=env,
+        )
+        if result.returncode != 0:
+            logger.warning(f"[Worker] stderr: {result.stderr[:400]}")
+
+        stdout = result.stdout.strip() if result.stdout else ""
+        if stdout:
+            return _json.loads(stdout)
+        return []
+    except subprocess.TimeoutExpired:
+        logger.error("[Worker] Subprocess timeout (300s)")
+        return []
+    except Exception as e:
+        logger.error(f"[Worker] Subprocess error: {e}")
+        return []
+
+
+def _scrape_in_process(keyword: str, limit: int, sources: list) -> list:
+    """
+    Scrape menggunakan subprocess worker terpisah per source.
+    """
+    results = []
+    limit_per_source = max(5, limit // max(len(sources), 1))
+
+    if "twitter" in sources:
+        logger.info(f"[Pipeline] Social search via subprocess: {keyword}")
+        enriched = f"{keyword} pendapat komentar ulasan netizen"
+        social = _scrape_via_subprocess(enriched, limit_per_source)
+        for item in social:
+            item["source"] = "twitter"
+        results.extend(social)
+        logger.info(f"[Pipeline] Social: {len(social)} hasil")
+
+    if "web" in sources or "news" in sources:
+        logger.info(f"[Pipeline] Web search via subprocess: {keyword}")
+        web = _scrape_via_subprocess(keyword, limit_per_source)
+        results.extend(web)
+        logger.info(f"[Pipeline] Web: {len(web)} hasil")
+
+    # Deduplicate
+    seen = set()
+    unique = []
+    for item in results:
+        t = item.get("raw_text", "")[:80]
+        if t and t not in seen:
+            seen.add(t)
+            unique.append(item)
+
+    return unique[:limit]
+
+
 def start_scrape_pipeline(keyword: str, limit: int, sources: list[str], mode: str = "demo") -> str:
     req_id = str(uuid.uuid4())
     _update_status(req_id, PENDING, "Mempersiapkan proses scraping...", 0, mode=mode)
@@ -53,71 +137,85 @@ def start_scrape_pipeline(keyword: str, limit: int, sources: list[str], mode: st
         try:
             _update_status(req_id, SCRAPING, f"Sedang mengambil data untuk kata kunci '{keyword}'...", 10, mode=mode)
 
-            scraper_url = f"{SCRAPER_BASE_URL}{SCRAPER_ENDPOINT}"
+            # ── FIX #1: timeout diperbesar ── httpx default 10s terlalu cepat
+            # Scraping butuh ~60-120 detik (Twitter + web search paralel)
+            # Pakai timeout dari config (SCRAPER_TIMEOUT = 300s)
             try:
+                scraper_url = f"{SCRAPER_BASE_URL}{SCRAPER_ENDPOINT}"
                 response = httpx.post(
                     scraper_url,
                     json={"keyword": keyword, "limit": limit, "sources": sources},
-                    timeout=SCRAPER_TIMEOUT,
+                    timeout=httpx.Timeout(
+                        connect=10.0,   # Koneksi awal cepat (scraper harus sudah jalan)
+                        read=300.0,     # FIX #1: Tunggu 5 menit untuk scraping selesai
+                        write=10.0,
+                        pool=5.0,
+                    ),
                 )
                 response.raise_for_status()
-            except httpx.ConnectError:
-                logger.warning(f"Scraper tidak tersedia di {scraper_url} (ConnectError).")
-                _update_status(
-                    req_id, FAILED,
-                    f"Layanan scraper tidak aktif. Pastikan server scraper berjalan di {SCRAPER_BASE_URL}.",
-                    0
-                )
-                return
-            except httpx.TimeoutException:
-                logger.warning(f"Scraper timeout setelah {SCRAPER_TIMEOUT}s.")
-                _update_status(
-                    req_id, FAILED,
-                    f"Scraper tidak merespons dalam {SCRAPER_TIMEOUT} detik. Coba kurangi jumlah data.",
-                    0
-                )
-                return
-            except httpx.HTTPStatusError as exc:
-                logger.warning(f"Scraper HTTP error: {exc.response.status_code}")
-                _update_status(
-                    req_id, FAILED,
-                    f"Scraper mengembalikan error {exc.response.status_code}.",
-                    0
-                )
-                return
+                scraper_data = response.json()
+                if scraper_data.get("status") == "success":
+                    data = scraper_data.get("data", [])
+                    logger.info(f"[Pipeline] Scraper eksternal: {len(data)} hasil")
+            except Exception as ext_err:
+                logger.warning(f"[Pipeline] Scraper eksternal tidak tersedia ({ext_err}), pakai in-process scraping")
+                data = _scrape_in_process(keyword, limit, sources)
 
-            scraper_data = response.json()
-
-            if scraper_data.get("status") != "success":
-                _update_status(req_id, FAILED, scraper_data.get("message", "Scraping gagal"), 0)
-                return
-
-            data = scraper_data.get("data", [])
+            # ── FIX #3: Graceful handling jika 0 hasil ────────────────────
+            # Jangan crash — buat file CSV kosong agar Dashboard tidak error.
             if not data:
-                _update_status(req_id, COMPLETED, "Tidak ada data yang ditemukan", 100, total_results=0, file_path="")
+                logger.warning(f"[Pipeline] Tidak ada data yang berhasil diambil untuk '{keyword}'")
+                # Buat CSV kosong yang valid (header saja) agar /api/download tidak 404
+                empty_csv = generate_csv_output([])
+                file_path  = DATA_DIR / f"{req_id}.csv"
+                with open(file_path, "w", encoding="utf-8-sig", newline="") as f:
+                    f.write(empty_csv)
+                _update_status(
+                    req_id, COMPLETED,
+                    f"Tidak ada data yang berhasil diambil untuk '{keyword}'. "
+                    "Coba kata kunci lain atau perbarui cookie X (jalankan: python export_twitter_cookies.py).",
+                    100,
+                    total_results=0,
+                    file_path=str(file_path),
+                    summary={"Positif": 0, "Negatif": 0, "Netral": 0, "total": 0},
+                    keyword=keyword,
+                )
                 return
 
             _update_status(req_id, INFERENCING, "Menganalisis sentimen...", 50)
 
-            raw_texts = [t.get("raw_text", "") for t in data]
-            dates = [t.get("date", "") for t in data]
-            sources_list = [t.get("source", "") for t in data]
+            raw_texts    = [t.get("raw_text", "")  for t in data]
+            dates        = [t.get("date",     "")  for t in data]
+            sources_list = [t.get("source",   "")  for t in data]
+            clean_texts  = [preprocess_text(text)  for text in raw_texts]
 
-            clean_texts = [preprocess_text(text) for text in raw_texts]
-            predictions = predict_batch(clean_texts)
+            try:
+                predictions = []
+                total = len(clean_texts)
+                for i, txt in enumerate(clean_texts):
+                    pred = predict_batch([txt])[0]
+                    predictions.append(pred)
+                    time.sleep(0.05)  # release GIL so Flask can serve status polls
+                    if (i + 1) % 10 == 0:
+                        progress = 50 + int(((i + 1) / total) * 45)
+                        _update_status(req_id, INFERENCING, f"Menganalisis sentimen... ({i+1}/{total})", progress)
+            except Exception as e:
+                logger.error(f"[Pipeline] IndoBERT inference error: {e}", exc_info=True)
+                _update_status(req_id, FAILED, f"Inferensi gagal: {str(e)}", 0)
+                return
 
             results = []
             for raw, clean, date, src, pred in zip(raw_texts, clean_texts, dates, sources_list, predictions):
                 results.append({
-                    "raw_text": raw,
-                    "clean_text": clean,
-                    "date": date,
-                    "source": src,
-                    "predicted_label": pred.get("predicted_label", "Netral"),
+                    "raw_text":            raw,
+                    "clean_text":          clean,
+                    "date":                date,
+                    "source":              src,
+                    "predicted_label":     pred.get("predicted_label",     "Netral"),
                     "confidence_positive": pred.get("confidence_positive", 0.0),
                     "confidence_negative": pred.get("confidence_negative", 0.0),
-                    "confidence_neutral": pred.get("confidence_neutral", 0.0),
-                    "inference_time_ms": pred.get("inference_time_ms", 0.0),
+                    "confidence_neutral":  pred.get("confidence_neutral",  0.0),
+                    "inference_time_ms":   pred.get("inference_time_ms",   0.0),
                 })
 
             csv_content = generate_csv_output(results)

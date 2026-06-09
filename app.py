@@ -539,7 +539,7 @@ def api_batch():
 
 @app.route("/api/scrape", methods=["POST"])
 def api_scrape():
-    """JSON endpoint live scraping â€” dipanggil SPA via fetch(), menggunakan background task."""
+    """JSON endpoint live scraping — dipanggil SPA via fetch(), menggunakan background task."""
     if not MODEL_LOADED:
         return jsonify({"error": "Model belum dimuat."}), 503
 
@@ -555,17 +555,10 @@ def api_scrape():
     except (ValueError, TypeError):
         limit = DEFAULT_SCRAPE_LIMIT
 
-    sources = body.get("sources", ["twitter"])
+    sources = body.get("sources", ["twitter", "web"])
     mode = body.get("mode", "live")
 
-    # Quick ping to check if scraper is alive
-    try:
-        httpx.get(f"{SCRAPER_BASE_URL}/health", timeout=2.0)
-    except (httpx.ConnectError, httpx.TimeoutException):
-        return jsonify({
-            "error": f"Layanan scraper tidak aktif. Pastikan server scraper berjalan di {SCRAPER_BASE_URL}."
-        }), 503
-
+    # Pipeline punya fallback in-process jika scraper eksternal tidak tersedia
     from pipeline import start_scrape_pipeline
     try:
         req_id = start_scrape_pipeline(keyword, limit, sources, mode=mode)
@@ -640,12 +633,25 @@ def api_results(req_id):
                 "confidence_neutral": float(item.get("confidence_netral", 0)),
             })
 
+        dist = get_overall_distribution(df)
+        confidence_avg = {
+            "positive": round(float(df["confidence_positif"].mean()) * 100, 1) if "confidence_positif" in df.columns else 0.0,
+            "neutral":  round(float(df["confidence_netral"].mean())  * 100, 1) if "confidence_netral"  in df.columns else 0.0,
+            "negative": round(float(df["confidence_negatif"].mean()) * 100, 1) if "confidence_negatif" in df.columns else 0.0,
+        }
         return jsonify({
-            "distribution": get_overall_distribution(df),
-            "timeline": get_timeline_data(df),
-            "top_items": top_items,
-            "model_metrics": MODEL_METRICS,
-            "total_results": status_data.get("total_results", len(df)),
+            "distribution": dist,
+            "summary": {
+                "total":          dist["total"],
+                "positive_count": dist["positive"],
+                "neutral_count":  dist["neutral"],
+                "negative_count": dist["negative"],
+            },
+            "timeline":       get_timeline_data(df),
+            "confidence_avg": confidence_avg,
+            "top_items":      top_items,
+            "model_metrics":  MODEL_METRICS,
+            "total_results":  status_data.get("total_results", len(df)),
         })
     return jsonify({"error": "Results not ready or not found."}), 404
 

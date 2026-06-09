@@ -267,6 +267,77 @@
             border-radius: 0.5rem;
             padding: 1rem;
         }
+
+        /* Loading Screen Styles */
+        .loading-view {
+            transition: opacity 0.5s ease;
+        }
+        
+        .loading-view.hidden-view {
+            display: none;
+            opacity: 0;
+        }
+
+        .vortex-bg {
+            background: radial-gradient(circle at center, rgba(185, 199, 228, 0.05) 0%, rgba(7, 18, 42, 1) 70%);
+        }
+        
+        @keyframes pulse-slow {
+            0%, 100% { opacity: 0.8; transform: scale(1) translateY(0); }
+            50% { opacity: 1; transform: scale(1.02) translateY(-10px); }
+        }
+        
+        .pulse-head {
+            animation: pulse-slow 6s ease-in-out infinite;
+        }
+
+        @keyframes scanline {
+            0% { transform: translateY(-100%); }
+            100% { transform: translateY(100vh); }
+        }
+
+        .scanline-effect {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background: linear-gradient(to bottom, transparent, rgba(214, 227, 255, 0.3), transparent);
+            animation: scanline 6s linear infinite;
+            pointer-events: none;
+            z-index: 50;
+        }
+
+        .module-item {
+            position: relative;
+            padding-left: 1rem;
+        }
+        
+        .module-item::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 4px;
+            height: 4px;
+            background-color: theme('colors.primary');
+            border-radius: 50%;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+
+        .cursor-blink {
+            animation: blink 1s step-end infinite;
+        }
+
+        .interactive-head-container {
+            transition: transform 0.1s ease-out;
+            transform-style: preserve-3d;
+        }
     </style>
 </head>
 <body class="bg-surface-dim text-on-surface antialiased min-h-screen flex flex-col font-body-base">
@@ -371,6 +442,110 @@
 </div>
 </div>
 </main>
+
+<!-- Loading View -->
+<div class="loading-view hidden-view fixed inset-0 z-[100] flex flex-col items-center justify-center w-full h-full vortex-bg bg-background" id="loading-view">
+    <!-- Dense Swarm Canvas -->
+    <canvas class="absolute inset-0 z-0 opacity-30 pointer-events-none" id="swarmCanvas"></canvas>
+    <!-- Scanline Overlay -->
+    <div class="scanline-effect"></div>
+    <div class="absolute top-8 left-8 font-mono-code text-[10px] text-primary/60 flex flex-col items-start gap-1 z-20">
+        <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-primary animate-pulse"></span><span>CORE_SYNC_STATUS</span></div>
+        <div class="text-on-surface-variant/40">STABLE / 0.002% ERR</div>
+        <div class="w-24 h-[1px] bg-outline-variant/30 mt-1"></div>
+    </div>
+    <div class="absolute top-8 right-8 font-mono-code text-[10px] text-primary/60 flex flex-col items-end gap-1 z-20">
+        <div class="flex items-center gap-2"><span>LATENCY MONITOR</span><span class="w-2 h-2 rounded-full bg-primary animate-pulse"></span></div>
+        <div class="text-on-surface-variant/40">12.4ms AVG</div>
+        <div class="w-24 h-[1px] bg-outline-variant/30 mt-1"></div>
+    </div>
+    <!-- Central Silhouette -->
+    <div class="relative w-[300px] h-[400px] md:w-[400px] md:h-[500px] z-10 opacity-90 mix-blend-screen interactive-head-container pulse-head" id="interactive-cranium" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuAUtfhZ6Rl6vtqzC4jZYFMb3o5m9DK48ecODhfQgWBa2qn1SCbfWeH01xCIQtXXWkXT2qYttQ-o6zfFmpQL7zRyVamKDSS-pOQgv39ch9BdWoedcuJIGNseJD-vLSQHj38vT11Ns_uT3YE3S5CNUZbx6bKAaMCADmQjUXZDXkq3IyEQpPLs9SvNTvLOBoClhKxgUYhHVqtZPrek-Lq2SgT2nozU4PBzgaEEm4uMzLwL3lrTwl9xVTF81rrLZnkHZCDTMNv65t_awm4'); background-size: cover; background-position: center; filter: grayscale(100%) contrast(150%) brightness(1.2);">
+        <!-- Hairline Frame -->
+        <div class="absolute inset-0 border border-outline-variant/30 rounded-full blur-[2px]"></div>
+        <!-- Data Swarm: Dense Orbiting Text Layers -->
+        <div class="absolute inset-0 pointer-events-none transition-transform duration-100 ease-out" id="orbit-swarm">
+            <!-- Core Dense Layers -->
+            <div class="absolute inset-[-10px] border-b border-primary/10 rounded-full animate-[spin_10s_linear_infinite]"><div class="absolute -bottom-4 left-1/2 -translate-x-1/2 font-mono-code text-[6px] text-primary/60">0x1A_SYNC</div></div>
+            <div class="absolute inset-[-20px] border-l border-primary/5 rounded-full animate-[spin_14s_linear_infinite_reverse]"><div class="absolute top-1/2 -left-8 -translate-y-1/2 font-mono-code text-[7px] text-on-surface-variant/40 -rotate-90">SENTIMENTS_CORE_v1.0</div></div>
+            <div class="absolute inset-[-30px] border border-primary/5 rounded-full animate-[spin_18s_linear_infinite]"><div class="absolute -top-4 left-1/2 -translate-x-1/2 font-mono-code text-[6px] text-primary/30">FRONTAL_LOBE.VTX</div></div>
+            <div class="absolute inset-[-40px] border-r border-outline-variant/10 rounded-full animate-[spin_22s_linear_infinite_reverse]"><div class="absolute top-1/2 -right-8 -translate-y-1/2 font-mono-code text-[8px] text-primary/40 rotate-90">0x8F2_ORBIT</div></div>
+            <div class="absolute inset-[-50px] border-t border-primary/15 rounded-full animate-[spin_25s_linear_infinite]"><div class="absolute -top-4 left-1/2 -translate-x-1/2 font-mono-code text-[7px] text-primary/30">DATA_STREAM_ALPHA</div></div>
+            <div class="absolute inset-[-60px] border-b border-primary/10 rounded-full animate-[spin_28s_linear_infinite_reverse]"><div class="absolute -bottom-4 left-1/2 -translate-x-1/2 font-mono-code text-[6px] text-on-surface-variant/30">HEX_SYNC</div></div>
+            <div class="absolute inset-[-70px] border-l border-outline-variant/5 rounded-full animate-[spin_31s_linear_infinite]"><div class="absolute top-1/2 -left-8 -translate-y-1/2 font-mono-code text-[7px] text-on-surface-variant/30 -rotate-90">LATENT_SPACE_v2</div></div>
+            <div class="absolute inset-[-80px] border border-primary/5 rounded-full animate-[spin_34s_linear_infinite_reverse]"><div class="absolute -bottom-4 left-1/2 -translate-x-1/2 font-mono-code text-[6px] text-primary/40">PARALLEL_SYNC</div></div>
+            <div class="absolute inset-[-90px] border-r border-outline-variant/10 rounded-full animate-[spin_37s_linear_infinite]"><div class="absolute top-1/2 -right-8 -translate-y-1/2 font-mono-code text-[8px] text-primary/20 rotate-90">NEURAL_FLOW</div></div>
+            <div class="absolute inset-[-100px] border-t border-primary/10 rounded-full animate-[spin_40s_linear_infinite_reverse]"><div class="absolute -top-4 left-1/2 -translate-x-1/2 font-mono-code text-[7px] text-on-surface-variant/20">NODE_LINK_0x44</div></div>
+            <!-- Mid-Dense Layers -->
+            <div class="absolute inset-[-110px] border-b border-outline-variant/5 rounded-full animate-[spin_43s_linear_infinite]"><div class="absolute -bottom-4 left-1/2 -translate-x-1/2 font-mono-code text-[6px] text-primary/25">SYNAPSE_MAP.04</div></div>
+            <div class="absolute inset-[-120px] border-l border-primary/5 rounded-full animate-[spin_46s_linear_infinite_reverse]"><div class="absolute top-1/2 -left-8 -translate-y-1/2 font-mono-code text-[6px] text-on-surface-variant/40 -rotate-90">SYNAPSE_MAP_ACTIVE</div></div>
+            <div class="absolute inset-[-130px] border border-outline-variant/5 rounded-full animate-[spin_49s_linear_infinite]"><div class="absolute -top-4 left-1/2 -translate-x-1/2 font-mono-code text-[8px] text-primary/20">NODE_ID_0x99F</div></div>
+            <div class="absolute inset-[-140px] border-r border-primary/5 rounded-full animate-[spin_52s_linear_infinite_reverse]"><div class="absolute top-1/2 -right-8 -translate-y-1/2 font-mono-code text-[7px] text-primary/25 rotate-90">COGNITIVE_RESONANCE</div></div>
+            <div class="absolute inset-[-150px] border-t border-outline-variant/10 rounded-full animate-[spin_55s_linear_infinite]"><div class="absolute -top-4 left-1/2 -translate-x-1/2 font-mono-code text-[6px] text-on-surface-variant/20">SEMANTIC_BUFFER_LOAD</div></div>
+            <div class="absolute inset-[-160px] border-b border-primary/5 rounded-full animate-[spin_58s_linear_infinite_reverse]"><div class="absolute -bottom-4 left-1/2 -translate-x-1/2 font-mono-code text-[6px] text-primary/15">0x00A1F7_MEM_ALLOC</div></div>
+            <div class="absolute inset-[-170px] border-l border-outline-variant/5 rounded-full animate-[spin_61s_linear_infinite]"><div class="absolute top-1/2 -left-8 -translate-y-1/2 font-mono-code text-[7px] text-on-surface-variant/15 -rotate-90">AFFECTIVE_COMPUTING</div></div>
+            <div class="absolute inset-[-180px] border border-primary/5 rounded-full animate-[spin_64s_linear_infinite_reverse]"><div class="absolute -top-4 left-1/2 -translate-x-1/2 font-mono-code text-[6px] text-primary/10">SWARM_INTELLIGENCE</div></div>
+            <div class="absolute inset-[-190px] border-r border-outline-variant/5 rounded-full animate-[spin_67s_linear_infinite]"><div class="absolute top-1/2 -right-8 -translate-y-1/2 font-mono-code text-[6px] text-primary/30 rotate-90">0xCC_BUFFER</div></div>
+            <div class="absolute inset-[-200px] border-t border-primary/10 rounded-full animate-[spin_70s_linear_infinite_reverse]"><div class="absolute -top-4 left-1/2 -translate-x-1/2 font-mono-code text-[8px] text-primary/20">0xDEAD_BEEF</div></div>
+            <!-- Outer Dense Layers -->
+            <div class="absolute inset-[-210px] border-b border-outline-variant/5 rounded-full animate-[spin_73s_linear_infinite]"><div class="absolute -bottom-4 left-1/2 -translate-x-1/2 font-mono-code text-[6px] text-on-surface-variant/20">SYNAPSE_MAP.09</div></div>
+            <div class="absolute inset-[-220px] border-l border-primary/5 rounded-full animate-[spin_76s_linear_infinite_reverse]"><div class="absolute top-1/2 -left-8 -translate-y-1/2 font-mono-code text-[7px] text-primary/15 -rotate-90">NEURAL_GATE_OPEN</div></div>
+            <div class="absolute inset-[-230px] border border-outline-variant/5 rounded-full animate-[spin_79s_linear_infinite]"><div class="absolute -top-4 left-1/2 -translate-x-1/2 font-mono-code text-[6px] text-on-surface-variant/30">0xFF_NULL_POINTER</div></div>
+            <div class="absolute inset-[-240px] border-r border-primary/10 rounded-full animate-[spin_82s_linear_infinite_reverse]"><div class="absolute top-1/2 -right-8 -translate-y-1/2 font-mono-code text-[6px] text-primary/25 rotate-90">QUANTUM_ENTANGLEMENT</div></div>
+            <div class="absolute inset-[-250px] border-t border-outline-variant/5 rounded-full animate-[spin_85s_linear_infinite]"><div class="absolute -top-4 left-1/2 -translate-x-1/2 font-mono-code text-[7px] text-on-surface-variant/10">MEMORY_LEAK_DETECTED</div></div>
+            <div class="absolute inset-[-260px] border-b border-primary/5 rounded-full animate-[spin_88s_linear_infinite_reverse]"><div class="absolute -bottom-4 left-1/2 -translate-x-1/2 font-mono-code text-[6px] text-primary/10">KERNEL_PANIC_BYPASS</div></div>
+            <div class="absolute inset-[-270px] border-l border-outline-variant/10 rounded-full animate-[spin_91s_linear_infinite]"><div class="absolute top-1/2 -left-8 -translate-y-1/2 font-mono-code text-[6px] text-primary/20 -rotate-90">SYS_OVR_99.9</div></div>
+            <div class="absolute inset-[-280px] border border-primary/5 rounded-full animate-[spin_94s_linear_infinite_reverse]"><div class="absolute -top-4 left-1/2 -translate-x-1/2 font-mono-code text-[6px] text-on-surface-variant/25">ECHO_CHAMBER_ACTIVE</div></div>
+            <div class="absolute inset-[-290px] border-r border-outline-variant/5 rounded-full animate-[spin_97s_linear_infinite]"><div class="absolute top-1/2 -right-8 -translate-y-1/2 font-mono-code text-[7px] text-primary/15 rotate-90">VOID_SECTOR_7</div></div>
+            <div class="absolute inset-[-300px] border-t border-primary/5 rounded-full animate-[spin_100s_linear_infinite_reverse]"><div class="absolute -top-4 left-1/2 -translate-x-1/2 font-mono-code text-[6px] text-on-surface-variant/20">SUBLIMINAL_INJECT</div></div>
+            <div class="absolute inset-[-320px] border-b border-outline-variant/5 rounded-full animate-[spin_105s_linear_infinite]"><div class="absolute -bottom-4 left-1/2 -translate-x-1/2 font-mono-code text-[6px] text-primary/10">0x000_ROOT_ACCESS</div></div>
+            <div class="absolute inset-[-340px] border-l border-primary/5 rounded-full animate-[spin_110s_linear_infinite_reverse]"><div class="absolute top-1/2 -left-8 -translate-y-1/2 font-mono-code text-[6px] text-on-surface-variant/15 -rotate-90">CORTEX_OVERRIDE</div></div>
+            <div class="absolute inset-[-360px] border border-outline-variant/5 rounded-full animate-[spin_115s_linear_infinite]"><div class="absolute -top-4 left-1/2 -translate-x-1/2 font-mono-code text-[6px] text-primary/20">GHOST_IN_MACHINE</div></div>
+            <div class="absolute inset-[-380px] border-r border-primary/5 rounded-full animate-[spin_120s_linear_infinite_reverse]"><div class="absolute top-1/2 -right-8 -translate-y-1/2 font-mono-code text-[6px] text-on-surface-variant/10 rotate-90">ORBITAL_DECAY_WARN</div></div>
+            <div class="absolute inset-[-400px] border-t border-outline-variant/5 rounded-full animate-[spin_125s_linear_infinite]"><div class="absolute -top-4 left-1/2 -translate-x-1/2 font-mono-code text-[6px] text-primary/15">FINAL_FRONTIER_SYNC</div></div>
+        </div>
+    </div>
+    <!-- Telemetry Layer (Perfectly Centered via Grid) -->
+    <div class="absolute bottom-12 md:bottom-24 w-full px-8 md:px-margin-desktop grid grid-cols-1 md:grid-cols-3 items-end z-20 gap-8">
+        <!-- Active Modules -->
+        <div class="flex flex-col gap-3 font-mono-code text-mono-code text-on-surface-variant md:justify-self-start self-end">
+            <div class="text-primary text-xs uppercase tracking-[0.2em] mb-2 border-b border-outline-variant/30 pb-1 w-max">Active Processes</div>
+            <div class="module-item opacity-40" id="module-token">SCRAPING_DATA <span class="text-on-surface-variant/50 ml-2">[0x7A2]</span></div>
+            <div class="module-item opacity-40" id="module-entity">PROCESSING_SENTIMENT <span class="text-on-surface-variant/50 ml-2">[0x1F4]</span></div>
+            <div class="module-item opacity-40" id="module-vector">FINALIZING_MAPPING <span class="text-on-surface-variant/50 ml-2">[WAIT]</span></div>
+        </div>
+        <!-- Central Counter -->
+        <div class="flex flex-col items-center justify-self-center self-end w-full text-center">
+            <div class="font-display-lg text-display-lg text-on-surface tracking-tighter" id="loading-counter"><span id="loading-counter-val">0</span><span class="text-on-surface-variant/50">%</span></div>
+            <div class="font-label-caps text-label-caps text-on-surface-variant tracking-widest mt-2 flex items-center justify-center">
+                <span id="loading-status-text">INITIALIZING</span><span class="w-2 h-4 bg-primary inline-block ml-2 cursor-blink"></span>
+            </div>
+            <div class="mt-8 flex items-end justify-center gap-1 h-8 opacity-40">
+                <div class="w-1 bg-primary h-2"></div>
+                <div class="w-1 bg-primary h-4"></div>
+                <div class="w-1 bg-primary h-6"></div>
+                <div class="w-1 bg-primary h-3"></div>
+                <div class="w-1 bg-primary h-5"></div>
+                <div class="w-1 bg-primary h-8"></div>
+                <div class="w-1 bg-primary h-4"></div>
+                <div class="w-1 bg-primary h-2"></div>
+            </div>
+            <div class="text-[8px] font-mono-code text-primary/40 mt-1 uppercase tracking-widest text-center">Sentiment Vector Analysis</div>
+        </div>
+        <!-- System Status -->
+        <div class="hidden md:flex flex-col items-end gap-1 font-mono-code text-[10px] leading-tight text-on-surface-variant/50 uppercase text-right md:justify-self-end self-end">
+            <div>SYS.STATE: <span id="loading-sys-state">LOCKED</span></div>
+            <div>LATENCY: 12ms</div>
+            <div>MEM: 8.4GB / 16GB</div>
+            <div>CORE.TEMP: OPTIMAL</div>
+        </div>
+    </div>
+    <!-- Corner Accents -->
+    <div class="absolute top-4 left-4 w-8 h-8 border-t border-l border-primary/20 pointer-events-none"></div>
+    <div class="absolute top-4 right-4 w-8 h-8 border-t border-r border-primary/20 pointer-events-none"></div>
+    <div class="absolute bottom-4 left-4 w-8 h-8 border-b border-l border-primary/20 pointer-events-none"></div>
+    <div class="absolute bottom-4 right-4 w-8 h-8 border-b border-r border-primary/20 pointer-events-none"></div>
+</div>
 <footer class="bg-surface-dim w-full py-base border-t border-on-surface/10 ui-container mt-auto">
 <div class="flex flex-col md:flex-row justify-between items-center px-margin-mobile md:px-margin-desktop gap-base max-w-container-max mx-auto">
 <div class="font-label-caps text-label-caps text-on-surface ui-element">
@@ -401,6 +576,8 @@
             landingView.classList.add('hidden-view');
             analysisView.classList.remove('active');
             batchView.classList.remove('active');
+            const loadView = document.getElementById('loading-view');
+            if(loadView) loadView.classList.add('hidden-view');
 
             if (viewId === 'landing') {
                 landingView.classList.remove('hidden-view');
@@ -416,6 +593,8 @@
                 navBatch.classList.remove('text-on-surface-variant');
                 navStart.classList.remove('text-primary', 'border-b-2', 'border-primary');
                 navStart.classList.add('text-on-surface-variant');
+            } else if (viewId === 'loading') {
+                if(loadView) loadView.classList.remove('hidden-view');
             }
         }
 
@@ -858,6 +1037,85 @@
         });
     </script>
 
+    <!-- Canvas Swarm & Interaction Script -->
+    <script>
+        // Canvas background for dense swarm of text and hex codes
+        const canvas2d = document.getElementById('swarmCanvas');
+        if (canvas2d) {
+            const ctx = canvas2d.getContext('2d');
+            let width2d, height2d;
+
+            function resize2d() {
+                width2d = canvas2d.width = window.innerWidth;
+                height2d = canvas2d.height = window.innerHeight;
+            }
+            window.addEventListener('resize', resize2d);
+            resize2d();
+
+            const chars = '0123456789ABCDEF0x<>{}[]$@#*'.split('');
+            const particles2d = [];
+            const particleCount2d = 200;
+
+            for(let i=0; i<particleCount2d; i++) {
+                particles2d.push({
+                    x: Math.random() * width2d,
+                    y: Math.random() * height2d,
+                    char: chars[Math.floor(Math.random() * chars.length)],
+                    speedX: (Math.random() - 0.5) * 0.4,
+                    speedY: (Math.random() - 0.5) * 0.4,
+                    size: Math.random() * 12 + 8,
+                    opacity: Math.random() * 0.5 + 0.1
+                });
+            }
+
+            function drawSwarm() {
+                const loadingView = document.getElementById('loading-view');
+                if (loadingView && !loadingView.classList.contains('hidden-view')) {
+                    ctx.clearRect(0, 0, width2d, height2d);
+                    particles2d.forEach(p => {
+                        p.x += p.speedX;
+                        p.y += p.speedY;
+                        if(p.x < 0) p.x = width2d;
+                        if(p.x > width2d) p.x = 0;
+                        if(p.y < 0) p.y = height2d;
+                        if(p.y > height2d) p.y = 0;
+                        
+                        ctx.fillStyle = `rgba(185, 199, 228, ${p.opacity})`;
+                        ctx.font = `${p.size}px monospace`;
+                        ctx.fillText(p.char, p.x, p.y);
+                        
+                        if(Math.random() < 0.02) p.char = chars[Math.floor(Math.random() * chars.length)];
+                    });
+                }
+                requestAnimationFrame(drawSwarm);
+            }
+            drawSwarm();
+        }
+
+        document.addEventListener('mousemove', (e) => { 
+            const cranium = document.getElementById('interactive-cranium'); 
+            const swarm = document.getElementById('orbit-swarm');
+            const loadingView = document.getElementById('loading-view');
+            
+            if (!cranium || !loadingView || loadingView.classList.contains('hidden-view')) return; 
+            
+            const { clientX, clientY } = e; 
+            const { innerWidth, innerHeight } = window; 
+            
+            const moveX = (clientX - innerWidth / 2) / 30; 
+            const moveY = (clientY - innerHeight / 2) / 30; 
+            
+            cranium.style.transform = `perspective(1000px) rotateY(${moveX}deg) rotateX(${-moveY}deg)`; 
+            
+            if(swarm) {
+                const dist = Math.sqrt(Math.pow(clientX - innerWidth/2, 2) + Math.pow(clientY - innerHeight/2, 2));
+                const maxDist = Math.sqrt(Math.pow(innerWidth/2, 2) + Math.pow(innerHeight/2, 2));
+                const proximity = Math.max(0, 1 - (dist / maxDist));
+                swarm.style.transform = `scale(${1 + proximity * 0.05})`;
+            }
+        });
+    </script>
+
 <script>
 // =============================================================
 // KONEKSI BACKEND — hanya menyambungkan UI yang sudah ada ke API
@@ -917,79 +1175,132 @@
                 const reqId = data.req_id;
                 if (_analysisStatus) _analysisStatus.textContent = 'Memulai proses scraping...';
                 if (_analysisTitle)  _analysisTitle.textContent  = `Analysis: ${text}`;
-                showView('analysis');
+                showView('loading');
                 
                 // Polling logic
-                const interval = setInterval(async () => {
+                const POLL_INTERVAL_MS = 2000;
+                const MAX_ELAPSED_MS   = 300_000; // 5 minutes
+                const MAX_RETRIES      = 5;
+                const PER_REQ_TIMEOUT  = 30_000;  // 30 s per individual fetch
+
+                const pollStart = Date.now();
+                let fetchFailCount = 0;
+
+                const doPoll = async () => {
+                    if (Date.now() - pollStart > MAX_ELAPSED_MS) {
+                        if (_analysisStatus) _analysisStatus.textContent = 'Proses melebihi batas waktu (5 menit). Silakan coba lagi.';
+                        newBtn.innerHTML = origHTML;
+                        newBtn.disabled  = false;
+                        return;
+                    }
+
+                    const controller = new AbortController();
+                    const tid = setTimeout(() => controller.abort(), PER_REQ_TIMEOUT);
+
                     try {
-                        const statusRes = await fetch(`/api/status/${reqId}`);
+                        const statusRes  = await fetch(`/api/status/${reqId}`, { signal: controller.signal });
+                        clearTimeout(tid);
+                        fetchFailCount = 0; // reset on success
+
                         const statusData = await statusRes.json();
-                        
-                        if (_analysisStatus) _analysisStatus.textContent = `Processing: ${statusData.message || statusData.status} (${statusData.progress || 0}%)`;
-                        
+                        if (_analysisStatus)
+                            _analysisStatus.textContent = `Processing: ${statusData.message || statusData.status} (${statusData.progress || 0}%)`;
+
+                        // Update Loading View elements
+                        const lStatusTxt = document.getElementById('loading-status-text');
+                        const lCounterVal = document.getElementById('loading-counter-val');
+                        if (lStatusTxt) lStatusTxt.textContent = (statusData.message || statusData.status || 'PROCESSING').toUpperCase();
+                        if (lCounterVal) lCounterVal.textContent = Math.round(statusData.progress || 0);
+
+                        // Module highlighting
+                        const state = statusData.status || '';
+                        const mod1 = document.getElementById('module-token');
+                        const mod2 = document.getElementById('module-entity');
+                        const mod3 = document.getElementById('module-vector');
+                        if (mod1) mod1.className = (state === 'SCRAPING') ? 'module-item opacity-100' : 'module-item opacity-40';
+                        if (mod2) mod2.className = (state === 'PROCESSING') ? 'module-item opacity-100' : 'module-item opacity-40';
+                        if (mod3) mod3.className = (state === 'MAPPING' || statusData.progress > 80 || state === 'COMPLETED') ? 'module-item opacity-100' : 'module-item opacity-40';
+
                         if (statusData.status === 'COMPLETED') {
-                            clearInterval(interval);
-                            
                             if (statusData.total_results === 0) {
                                 if (_analysisTitle)  _analysisTitle.textContent  = `Analysis: ${text}`;
                                 if (_analysisStatus) _analysisStatus.textContent = 'No data found for the given keyword.';
-                                
                                 newBtn.innerHTML = origHTML;
                                 newBtn.disabled  = false;
+                                showView('landing');
+                                alert('No data found for the given keyword.');
                                 return;
                             }
-
-                            // Fetch final results
                             fetch(`/api/results/${reqId}`)
                                 .then(r => r.json())
                                 .then(finalData => {
                                     if (_analysisTitle)  _analysisTitle.textContent  = `Analysis: ${text}`;
                                     if (_analysisStatus) _analysisStatus.textContent =
                                         `Done - Total: ${statusData.total_results} data - Time: ${new Date().toLocaleTimeString()}`;
-
                                     const badge = document.getElementById('demo-badge');
-                                    if(badge) badge.classList.add('hidden');
+                                    if (badge) badge.classList.add('hidden');
                                     const toggleBtn = document.getElementById('toggle-view-btn');
-                                    if(toggleBtn) {
+                                    if (toggleBtn) {
                                         toggleBtn.classList.remove('hidden');
                                         toggleBtn.innerHTML = '<span class="material-symbols-outlined text-[16px]">dataset</span> View Full Dataset';
                                     }
                                     isPrecomputedView = false;
-                                    
                                     const mappedData = {
                                         summary: {
-                                            total: finalData.distribution.total,
-                                            sentimen_positif: finalData.distribution.positif_count || finalData.distribution.positive,
-                                            sentimen_negatif: finalData.distribution.negatif_count || finalData.distribution.negative,
-                                            sentimen_netral: finalData.distribution.netral_count || finalData.distribution.neutral
+                                            total:          finalData.summary?.total          ?? finalData.distribution?.total    ?? 0,
+                                            positive_count: finalData.summary?.positive_count ?? finalData.distribution?.positive ?? 0,
+                                            neutral_count:  finalData.summary?.neutral_count  ?? finalData.distribution?.neutral  ?? 0,
+                                            negative_count: finalData.summary?.negative_count ?? finalData.distribution?.negative ?? 0,
                                         },
-                                        results: finalData.top_items,
-                                        timeline: finalData.timeline
+                                        timeline:       finalData.timeline       || [],
+                                        confidence_avg: finalData.confidence_avg || { positive: 0, neutral: 0, negative: 0 },
+                                        model_metrics:  finalData.model_metrics  || {},
+                                        results:        finalData.top_items      || [],
                                     };
+                                    showView('analysis');
                                     initChartsWithData(mappedData);
-                                    
                                     newBtn.innerHTML = origHTML;
                                     newBtn.disabled  = false;
                                 })
                                 .catch(e => {
-                                    console.error("Gagal memuat hasil akhir", e);
+                                    console.error('Gagal memuat hasil akhir', e);
                                     if (_analysisStatus) _analysisStatus.textContent = 'Error memuat hasil akhir';
                                     newBtn.innerHTML = origHTML;
                                     newBtn.disabled  = false;
+                                    showView('landing');
                                 });
-                        } else if (statusData.status === 'FAILED' || statusData.status === 'NOT_FOUND') {
-                            clearInterval(interval);
+                            return; // do not schedule next poll
+                        }
+
+                        if (statusData.status === 'FAILED' || statusData.status === 'NOT_FOUND') {
                             if (_analysisStatus) _analysisStatus.textContent = 'Error: ' + (statusData.message || 'Proses gagal');
                             newBtn.innerHTML = origHTML;
                             newBtn.disabled  = false;
+                            showView('landing');
+                            alert('Proses gagal: ' + (statusData.message || 'Error'));
+                            return;
                         }
-                    } catch(pollErr) {
-                        clearInterval(interval);
-                        if (_analysisStatus) _analysisStatus.textContent = 'Error saat mengecek status: ' + pollErr.message;
-                        newBtn.innerHTML = origHTML;
-                        newBtn.disabled  = false;
+
+                    } catch (pollErr) {
+                        clearTimeout(tid);
+                        fetchFailCount++;
+                        if (fetchFailCount >= MAX_RETRIES) {
+                            if (_analysisStatus) _analysisStatus.textContent = 'Error saat mengecek status: ' + pollErr.message;
+                            newBtn.innerHTML = origHTML;
+                            newBtn.disabled  = false;
+                            showView('landing');
+                            alert('Error: ' + pollErr.message);
+                            return;
+                        }
+                        // silent retry after 3 s
+                        setTimeout(doPoll, 3000);
+                        return;
                     }
-                }, 2000);
+
+                    setTimeout(doPoll, POLL_INTERVAL_MS);
+                };
+
+                doPoll();
 
             } catch(err) {
                 alert('Error: ' + err.message);
@@ -1022,28 +1333,39 @@
             plugins: { legend: { labels: { color: '#c5c6cd' } } }
         };
 
-        const pos = (apiData.confidence_positive * 100);
-        const neu = (apiData.confidence_neutral  * 100);
-        const neg = (apiData.confidence_negative * 100);
-
-        // Timeline Chart (gunakan canvas #timelineChart yang sudah ada)
+        // Timeline Chart — line chart mapped from apiData.timeline
+        const tlData   = apiData.timeline || [];
+        const tlLabels = tlData.map(d => d.date);
         _chartInstances.timeline = new Chart(document.getElementById('timelineChart'), {
-            type: 'bar',
+            type: 'line',
             data: {
-                labels: ['Positif', 'Netral', 'Negatif'],
-                datasets: [{
-                    label: 'Confidence (%)',
-                    data: [pos, neu, neg],
-                    backgroundColor: ['rgba(217,226,255,0.3)', 'rgba(81,95,120,0.5)', 'rgba(255,180,171,0.3)'],
-                    borderColor: ['#d9e2ff', '#515f78', '#ffb4ab'],
-                    borderWidth: 1, borderRadius: 4
-                }]
+                labels: tlLabels,
+                datasets: [
+                    {
+                        label: 'Positif',
+                        data: tlData.map(d => d.positive),
+                        borderColor: '#d9e2ff', backgroundColor: 'rgba(217,226,255,0.1)',
+                        tension: 0.3, fill: false, pointRadius: 3
+                    },
+                    {
+                        label: 'Netral',
+                        data: tlData.map(d => d.neutral),
+                        borderColor: '#515f78', backgroundColor: 'rgba(81,95,120,0.1)',
+                        tension: 0.3, fill: false, pointRadius: 3
+                    },
+                    {
+                        label: 'Negatif',
+                        data: tlData.map(d => d.negative),
+                        borderColor: '#ffb4ab', backgroundColor: 'rgba(255,180,171,0.1)',
+                        tension: 0.3, fill: false, pointRadius: 3
+                    }
+                ]
             },
             options: { ...commonOptions,
                 scales: {
                     x: { grid: { color: 'rgba(143,144,151,0.1)' } },
-                    y: { grid: { color: 'rgba(143,144,151,0.1)' }, max: 100,
-                         ticks: { callback: v => v + '%' } }
+                    y: { grid: { color: 'rgba(143,144,151,0.1)' }, beginAtZero: true,
+                         ticks: { precision: 0 } }
                 }
             }
         });
@@ -1103,9 +1425,16 @@
                             isPrecomputedView = true;
                             
                             const mappedData = {
-                                summary: { total: finalData.distribution.total, sentimen_positif: finalData.distribution.positif_count, sentimen_negatif: finalData.distribution.negatif_count, sentimen_netral: finalData.distribution.netral_count },
-                                results: finalData.top_items,
-                                timeline: finalData.timeline
+                                summary: {
+                                    total:          finalData.summary?.total          ?? finalData.distribution?.total    ?? 0,
+                                    positive_count: finalData.summary?.positive_count ?? finalData.distribution?.positive ?? 0,
+                                    neutral_count:  finalData.summary?.neutral_count  ?? finalData.distribution?.neutral  ?? 0,
+                                    negative_count: finalData.summary?.negative_count ?? finalData.distribution?.negative ?? 0,
+                                },
+                                timeline:       finalData.timeline       || [],
+                                confidence_avg: finalData.confidence_avg || { positive: 0, neutral: 0, negative: 0 },
+                                model_metrics:  finalData.model_metrics  || {},
+                                results:        finalData.top_items      || [],
                             };
                             initChartsWithData(mappedData);
                         })
@@ -1122,28 +1451,33 @@
             });
         }
 
-        // Bar Chart (canvas #barChart sudah ada) — distribusi confidence
+        // Bar Chart (#barChart) — avg confidence per label
+        const cavg = apiData.confidence_avg || { positive: 0, neutral: 0, negative: 0 };
         _chartInstances.bar = new Chart(document.getElementById('barChart'), {
             type: 'bar',
             data: {
                 labels: ['Positif', 'Netral', 'Negatif'],
                 datasets: [
-                    { label: 'Score (%)', data: [pos, neu, neg], backgroundColor: '#515f78', borderRadius: 4 },
-                    { label: 'Threshold', data: [50, 50, 50], backgroundColor: '#2a344e', borderRadius: 4 }
+                    { label: 'Avg Confidence (%)', data: [cavg.positive, cavg.neutral, cavg.negative], backgroundColor: '#515f78', borderRadius: 4 },
+                    { label: 'Threshold (50%)',    data: [50, 50, 50], backgroundColor: '#2a344e', borderRadius: 4 }
                 ]
             },
             options: { ...commonOptions,
-                scales: { x: { grid: { display: false } }, y: { grid: { color: 'rgba(143,144,151,0.1)' } } }
+                scales: {
+                    x: { grid: { display: false } },
+                    y: { grid: { color: 'rgba(143,144,151,0.1)' }, max: 100, ticks: { callback: v => v + '%' } }
+                }
             }
         });
 
-        // Doughnut Chart (canvas #doughnutChart sudah ada)
+        // Doughnut Chart (#doughnutChart) — actual record counts per label
+        const sum = apiData.summary || { positive_count: 0, neutral_count: 0, negative_count: 0 };
         _chartInstances.doughnut = new Chart(document.getElementById('doughnutChart'), {
             type: 'doughnut',
             data: {
                 labels: ['Positif', 'Netral', 'Negatif'],
                 datasets: [{
-                    data: [pos, neu, neg],
+                    data: [sum.positive_count, sum.neutral_count, sum.negative_count],
                     backgroundColor: ['#d9e2ff', '#515f78', '#ffb4ab'],
                     borderWidth: 0, hoverOffset: 4
                 }]

@@ -1,261 +1,375 @@
 """
-web_search.py — Scrape hasil pencarian internet (Google Search) menggunakan Playwright.
-Mengambil snippet/deskripsi dari hasil pencarian web umum, bukan hanya berita.
+web_search.py — Scrape berita & opini dari internet
+=====================================================
+Pipeline (semua PARALEL):
+  1. Google News RSS  — paling reliable, data XML langsung
+  2. Yahoo Search     — tidak butuh JS, selector stabil
+  3. Detik Finance    — berita keuangan Indonesia
+  4. Kompas           — berita nasional Indonesia
+  5. Bing via Playwright — fallback JS-rendered
+
+Tidak ada masalah execution context karena requests dipisah dari Playwright.
 """
 import asyncio
 import uuid
 import logging
+import random
+import re
+import xml.etree.ElementTree as ET
 import urllib.parse
+import warnings
 from typing import List
 from datetime import datetime
-from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+import requests
+from bs4 import BeautifulSoup
+
+# Suppress SSL warnings
+try:
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+except Exception:
+    pass
+
+warnings.filterwarnings('ignore')
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_TIMEOUT = 30_000  # 30 detik
-
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
 ]
 
-import random
+TIMEOUT = 15
 
 
-async def _get_google_snippets(page, keyword: str, limit: int) -> List[dict]:
-    """Ambil snippet dari Google Search biasa (web search, bukan news)."""
+def _h(ua=None) -> dict:
+    return {
+        "User-Agent": ua or random.choice(USER_AGENTS),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8",
+        "Accept-Encoding": "gzip, deflate",
+        "Connection": "keep-alive",
+    }
+
+
+def _item(text: str, source: str, url: str = "") -> dict:
+    return {
+        "id":       str(uuid.uuid4()),
+        "source":   source,
+        "raw_text": text.strip(),
+        "date":     datetime.now().strftime("%Y-%m-%d"),
+        "url":      url,
+    }
+
+
+def _clean(s: str) -> str:
+    if not s:
+        return ""
+    # Hapus tag HTML
+    s = re.sub(r'<[^>]+>', ' ', s)
+    # Hapus entitas HTML
+    s = re.sub(r'&amp;', '&', s)
+    s = re.sub(r'&lt;', '<', s)
+    s = re.sub(r'&gt;', '>', s)
+    s = re.sub(r'&quot;', '"', s)
+    s = re.sub(r'&#\d+;', '', s)
+    s = re.sub(r'&\w+;', ' ', s)
+    return re.sub(r'\s+', ' ', s).strip()
+
+
+# ─────────────────────────────────────────────────────────────
+# 1. Google News RSS (PALING RELIABLE — data XML murni)
+# ─────────────────────────────────────────────────────────────
+def _google_news_rss(keyword: str, limit: int) -> List[dict]:
+    """Google News RSS feed — tidak perlu scraping, murni XML."""
     results = []
-    query = urllib.parse.quote(keyword)
-
-    # Google Web Search (bukan news)
-    search_url = f"https://www.google.com/search?q={query}&hl=id&gl=ID&num=20"
+    query = urllib.parse.quote_plus(keyword)
+    url = f"https://news.google.com/rss/search?q={query}&hl=id&gl=ID&ceid=ID:id"
 
     try:
-        await page.goto(search_url, wait_until="domcontentloaded", timeout=DEFAULT_TIMEOUT)
-        await asyncio.sleep(2)
+        r = requests.get(url, headers=_h(), timeout=TIMEOUT, verify=False)
+        root = ET.fromstring(r.content)
 
-        # Cek apakah ada captcha
-        page_content = await page.content()
-        if "unusual traffic" in page_content.lower() or "captcha" in page_content.lower():
-            logger.warning("Google menampilkan captcha, mencoba Bing...")
-            return await _get_bing_snippets(page, keyword, limit)
-
-        # Selector untuk deskripsi/snippet hasil pencarian Google
-        snippet_selectors = [
-            "div.VwiC3b",          # Snippet utama Google
-            "div.yDYNvb",          # Deskripsi alternatif
-            "div.lEBKkf",          # Format lain
-            "span.aCOpRe",         # Snippet inline
-            "div[data-sncf='1']",  # Format terbaru
-            "div.r025kc",          # Hasil AMP
-            "div.s3v9rd",          # Format lama
-        ]
-
-        for selector in snippet_selectors:
-            elements = await page.query_selector_all(selector)
-            for elem in elements:
-                if len(results) >= limit:
-                    break
-                try:
-                    text = await elem.inner_text()
-                    text = text.strip()
-                    if text and len(text) > 30:
-                        results.append({
-                            "id": str(uuid.uuid4()),
-                            "source": "web_search",
-                            "raw_text": text,
-                            "date": datetime.now().strftime("%Y-%m-%d"),
-                            "url": search_url,
-                        })
-                except Exception:
-                    continue
-
-            if results:
+        for item in root.findall(".//item"):
+            if len(results) >= limit:
                 break
 
-        # Juga ambil judul hasil pencarian
-        if len(results) < limit:
-            title_elems = await page.query_selector_all("h3.LC20lb, h3")
-            for elem in title_elems[:limit - len(results)]:
-                try:
-                    text = await elem.inner_text()
-                    text = text.strip()
-                    if text and len(text) > 10 and text not in [r["raw_text"] for r in results]:
-                        results.append({
-                            "id": str(uuid.uuid4()),
-                            "source": "web_search",
-                            "raw_text": text,
-                            "date": datetime.now().strftime("%Y-%m-%d"),
-                            "url": search_url,
-                        })
-                except Exception:
-                    continue
+            title = _clean(item.findtext("title", ""))
+            desc  = _clean(item.findtext("description", ""))
+            link  = item.findtext("link", url)
+
+            text = f"{title}. {desc}".strip(". ") if desc and desc != title else title
+            if len(text) < 10:
+                continue
+            results.append(_item(text, "google_news", link))
 
     except Exception as e:
-        logger.warning(f"Error Google search: {e}")
+        logger.warning(f"Google News RSS: {e}")
 
     return results
 
 
-async def _get_bing_snippets(page, keyword: str, limit: int) -> List[dict]:
-    """Fallback: Ambil snippet dari Bing Search."""
+# ─────────────────────────────────────────────────────────────
+# 2. Yahoo Search (tidak butuh JS, bisa di-parse dengan BS4)
+# ─────────────────────────────────────────────────────────────
+def _yahoo(keyword: str, limit: int) -> List[dict]:
+    """Yahoo Search — lebih toleran dari Bing/Google terhadap bot."""
     results = []
-    query = urllib.parse.quote(keyword)
-    search_url = f"https://www.bing.com/search?q={query}&setlang=id&cc=ID"
+    query = urllib.parse.quote_plus(keyword)
+    existing = set()
 
-    try:
-        await page.goto(search_url, wait_until="domcontentloaded", timeout=DEFAULT_TIMEOUT)
-        await asyncio.sleep(2)
+    for start in [1, 11]:   # 2 halaman
+        if len(results) >= limit:
+            break
+        url = f"https://search.yahoo.com/search?p={query}&n=20&b={start}&ei=UTF-8"
+        try:
+            r = requests.get(url, headers=_h(), timeout=TIMEOUT, verify=False,
+                             allow_redirects=True)
+            soup = BeautifulSoup(r.text, "lxml")
 
-        # Selector snippet Bing
-        snippet_selectors = [
-            "p.b_algoSlug",
-            "div.b_caption p",
-            "p.b_lineclamp2",
-            "p.b_lineclamp4",
-        ]
-
-        for selector in snippet_selectors:
-            elements = await page.query_selector_all(selector)
-            for elem in elements:
+            for res in soup.select("div.Sr, div.algo, div[class*='algo'], div.s-bd"):
                 if len(results) >= limit:
                     break
                 try:
-                    text = await elem.inner_text()
-                    text = text.strip()
-                    if text and len(text) > 30:
-                        results.append({
-                            "id": str(uuid.uuid4()),
-                            "source": "web_search",
-                            "raw_text": text,
-                            "date": datetime.now().strftime("%Y-%m-%d"),
-                            "url": search_url,
-                        })
+                    title_el   = res.select_one("h3 a, h3, .title a")
+                    snippet_el = res.select_one("p, .s-snippet, .compText")
+
+                    title   = _clean(title_el.get_text())   if title_el   else ""
+                    snippet = _clean(snippet_el.get_text()) if snippet_el else ""
+                    link    = title_el["href"] if title_el and title_el.get("href") else url
+
+                    text = f"{title}. {snippet}".strip(". ") if snippet else title
+                    if len(text) < 10 or text in existing:
+                        continue
+                    existing.add(text)
+                    results.append(_item(text, "yahoo", link))
                 except Exception:
                     continue
-
-            if results:
-                break
-
-    except Exception as e:
-        logger.warning(f"Error Bing search: {e}")
+        except Exception as e:
+            logger.warning(f"Yahoo: {e}")
 
     return results
 
 
-async def _get_duckduckgo_snippets(page, keyword: str, limit: int) -> List[dict]:
-    """Fallback kedua: DuckDuckGo."""
+# ─────────────────────────────────────────────────────────────
+# 3. Detik Finance + Detik News
+# ─────────────────────────────────────────────────────────────
+def _detik(keyword: str, limit: int) -> List[dict]:
+    """Detik Finance + Detik News search."""
     results = []
-    query = urllib.parse.quote(keyword)
-    search_url = f"https://html.duckduckgo.com/html/?q={query}&kl=id-id"
+    query = urllib.parse.quote_plus(keyword)
+    existing = set()
+
+    sources = [
+        # Detik Finance search
+        f"https://finance.detik.com/search?q={query}",
+        # Detik News search
+        f"https://news.detik.com/search?q={query}",
+        # Detik aggregate search
+        f"https://www.detik.com/search/searchall?query={query}",
+    ]
+
+    for url in sources:
+        if len(results) >= limit:
+            break
+        try:
+            r = requests.get(url, headers=_h(), timeout=TIMEOUT, verify=False)
+            soup = BeautifulSoup(r.text, "lxml")
+
+            # Berbagai selector Detik
+            items = soup.select(
+                "article, .list-content__item, .article__list-item, "
+                ".media__row, .box-search__result, .media--"
+            )
+            if not items:
+                # Fallback: ambil semua heading
+                items = soup.select("h2, h3")
+
+            for el in items:
+                if len(results) >= limit:
+                    break
+                try:
+                    # Coba ambil judul
+                    h = el if el.name in ["h2", "h3"] else el.select_one("h2, h3, .title, .media__title")
+                    if not h:
+                        continue
+                    title = _clean(h.get_text())
+                    if len(title) < 10 or title in existing:
+                        continue
+
+                    # Snippet opsional
+                    s = el.select_one("p, .media__desc, .excerpt")
+                    snippet = _clean(s.get_text()) if s else ""
+
+                    # Link
+                    a = el.select_one("a") or (el if el.name == "a" else None)
+                    link = a["href"] if a and a.get("href") else url
+
+                    text = f"{title}. {snippet}".strip(". ") if snippet else title
+                    existing.add(text)
+                    results.append(_item(text, "detik", link))
+                except Exception:
+                    continue
+        except Exception as e:
+            logger.warning(f"Detik {url[:40]}: {e}")
+
+    return results
+
+
+# ─────────────────────────────────────────────────────────────
+# 4. Kompas
+# ─────────────────────────────────────────────────────────────
+def _kompas(keyword: str, limit: int) -> List[dict]:
+    """Kompas.com search."""
+    results = []
+    query = urllib.parse.quote_plus(keyword)
+    url = f"https://search.kompas.com/search/?q={query}&submit=Submit"
+    existing = set()
 
     try:
-        await page.goto(search_url, wait_until="domcontentloaded", timeout=DEFAULT_TIMEOUT)
-        await asyncio.sleep(2)
+        r = requests.get(url, headers=_h(), timeout=TIMEOUT, verify=False)
+        soup = BeautifulSoup(r.text, "lxml")
 
-        elements = await page.query_selector_all("a.result__snippet, .result__snippet")
-        for elem in elements[:limit]:
+        for art in soup.select(".articleItem, article, .gsc-result, .gs-result"):
+            if len(results) >= limit:
+                break
             try:
-                text = await elem.inner_text()
-                text = text.strip()
-                if text and len(text) > 20:
-                    results.append({
-                        "id": str(uuid.uuid4()),
-                        "source": "web_search",
-                        "raw_text": text,
-                        "date": datetime.now().strftime("%Y-%m-%d"),
-                        "url": search_url,
-                    })
+                h = art.select_one("h2, h3, .gsc-title, .articleTitle")
+                if not h:
+                    continue
+                title = _clean(h.get_text())
+                if len(title) < 10 or title in existing:
+                    continue
+
+                s = art.select_one("p, .gsc-description, .articleDesc")
+                snippet = _clean(s.get_text()) if s else ""
+
+                a = art.select_one("a")
+                link = a["href"] if a and a.get("href") else url
+
+                text = f"{title}. {snippet}".strip(". ") if snippet else title
+                existing.add(text)
+                results.append(_item(text, "kompas", link))
             except Exception:
                 continue
-
     except Exception as e:
-        logger.warning(f"Error DuckDuckGo search: {e}")
+        logger.warning(f"Kompas: {e}")
 
     return results
 
 
-async def scrape_web_search(keyword: str, limit: int) -> List[dict]:
-    """
-    Scrape hasil pencarian internet menggunakan Playwright.
-    Mencoba Google → Bing → DuckDuckGo secara berurutan.
+# ─────────────────────────────────────────────────────────────
+# 5. Bing via Playwright (JS-rendered, sebagai fallback)
+# ─────────────────────────────────────────────────────────────
+async def _bing_playwright(keyword: str, limit: int) -> List[dict]:
+    """Bing via Playwright — untuk konten yang butuh JavaScript."""
+    from playwright.async_api import async_playwright
 
-    Args:
-        keyword: Kata kunci pencarian
-        limit: Jumlah hasil yang diinginkan
-
-    Returns:
-        List dict dengan key: id, source, raw_text, date, url
-    """
     results = []
-    user_agent = random.choice(USER_AGENTS)
+    query = urllib.parse.quote_plus(keyword)
+    url   = f"https://www.bing.com/search?q={query}&setlang=id&cc=ID&count=30"
+    existing = set()
+
+    _CHROME_PATHS = [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    ]
+    chrome_path = next((p for p in _CHROME_PATHS if __import__("pathlib").Path(p).exists()), None)
+    if not chrome_path:
+        return []
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
+            executable_path=chrome_path,
             headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-blink-features=AutomationControlled",
-                "--disable-infobars",
-                "--window-size=1280,800",
-            ]
+            args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
         )
         try:
-            context = await browser.new_context(
-                viewport={"width": 1280, "height": 800},
-                user_agent=user_agent,
-                locale="id-ID",
-                timezone_id="Asia/Jakarta",
-                extra_http_headers={
-                    "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                }
-            )
+            ctx  = await browser.new_context(locale="id-ID")
+            page = await ctx.new_page()
+            await page.goto(url, wait_until="domcontentloaded", timeout=25_000)
+            await asyncio.sleep(3)
 
-            await context.add_init_script("""
-                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-                window.chrome = { runtime: {} };
-            """)
+            # Coba berbagai selector Bing
+            for sel in ["li.b_algo", "#b_results > li", "ol#b_results li"]:
+                items = await page.query_selector_all(sel)
+                for el in items:
+                    if len(results) >= limit:
+                        break
+                    try:
+                        text = (await el.inner_text()).strip()
+                        lines = [l.strip() for l in text.split("\n") if len(l.strip()) > 20]
+                        for line in lines[:2]:
+                            if line not in existing:
+                                existing.add(line)
+                                results.append(_item(line, "bing", url))
+                    except Exception:
+                        continue
+                if results:
+                    break
 
-            page = await context.new_page()
-
-            # Coba Google Search
-            logger.info(f"Mencari di Google: {keyword}")
-            google_results = await _get_google_snippets(page, keyword, limit)
-            results.extend(google_results)
-            logger.info(f"Google: {len(google_results)} hasil")
-
-            # Jika Google kurang, coba Bing
-            if len(results) < limit // 2:
-                remaining = limit - len(results)
-                logger.info(f"Mencari di Bing: {keyword}")
-                bing_results = await _get_bing_snippets(page, keyword, remaining)
-                results.extend(bing_results)
-                logger.info(f"Bing: {len(bing_results)} hasil")
-
-            # Jika masih kurang, coba DuckDuckGo
-            if len(results) < limit // 3:
-                remaining = limit - len(results)
-                logger.info(f"Mencari di DuckDuckGo: {keyword}")
-                ddg_results = await _get_duckduckgo_snippets(page, keyword, remaining)
-                results.extend(ddg_results)
-                logger.info(f"DuckDuckGo: {len(ddg_results)} hasil")
-
+            await ctx.close()
         except Exception as e:
-            logger.error(f"Error web search scraping: {e}", exc_info=True)
+            logger.warning(f"Bing Playwright: {e}")
         finally:
             await browser.close()
 
+    return results
+
+
+# ─────────────────────────────────────────────────────────────
+# Main entry point
+# ─────────────────────────────────────────────────────────────
+async def scrape_web_search(keyword: str, limit: int) -> List[dict]:
+    """
+    Scrape hasil pencarian dari berbagai sumber secara PARALEL.
+    Sumber: Google News RSS + Yahoo + Detik + Kompas + Bing (Playwright)
+    """
+    logger.info(f"Web search: '{keyword}' | target={limit}")
+    per_src = max(15, limit // 2)
+
+    # Jalankan sumber requests secara paralel di thread pool
+    all_results: List[dict] = []
+
+    loop = asyncio.get_event_loop()
+
+    # Thread-based (requests)
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {
+            executor.submit(_google_news_rss, keyword, per_src): "google_news",
+            executor.submit(_yahoo,           keyword, per_src): "yahoo",
+            executor.submit(_detik,           keyword, per_src): "detik",
+            executor.submit(_kompas,          keyword, per_src): "kompas",
+        }
+        for future in as_completed(futures, timeout=35):
+            src = futures[future]
+            try:
+                res = future.result()
+                logger.info(f"  {src}: {len(res)} hasil")
+                all_results.extend(res)
+            except Exception as e:
+                logger.warning(f"  {src} error: {e}")
+
+    # Playwright Bing sebagai tambahan jika masih kurang
+    if len(all_results) < limit:
+        try:
+            bing_results = await _bing_playwright(keyword, limit - len(all_results))
+            logger.info(f"  bing_playwright: {len(bing_results)} hasil")
+            all_results.extend(bing_results)
+        except Exception as e:
+            logger.warning(f"  bing_playwright error: {e}")
+
     # Deduplikasi
     seen = set()
-    unique_results = []
-    for r in results:
-        key = r["raw_text"][:100]
-        if key not in seen:
+    unique = []
+    for r in all_results:
+        key = r["raw_text"][:100].lower()
+        if key not in seen and len(r["raw_text"]) > 10:
             seen.add(key)
-            unique_results.append(r)
+            unique.append(r)
 
-    logger.info(f"Web search total unik: {len(unique_results)} hasil")
-    return unique_results[:limit]
+    logger.info(f"Web search selesai: {len(unique)} hasil unik dari {len(all_results)} total")
+    return unique[:limit]

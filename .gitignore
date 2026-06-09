@@ -6,6 +6,9 @@ __pycache__/
 
 # Secrets
 *.env
+scraper/twitter_session.json
+scraper/cookies_config.json
+.env
 
 # Models
 models/

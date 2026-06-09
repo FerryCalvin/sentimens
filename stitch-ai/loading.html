@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Sentiments - Processing</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700&amp;family=Geist:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@300,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "on-tertiary": "#20304f",
+                        "on-surface-variant": "#c5c6cd",
+                        "terminal-placeholder": "rgba(197, 198, 205, 0.5)",
+                        "on-primary-fixed-variant": "#3a475f",
+                        "secondary-fixed": "#e3e2e0",
+                        "surface-container": "#151f37",
+                        "surface-container-lowest": "#030d25",
+                        "on-tertiary-fixed-variant": "#374767",
+                        "surface": "#07122a",
+                        "secondary": "#c7c6c4",
+                        "surface-bright": "#2f3952",
+                        "secondary-container": "#464745",
+                        "on-secondary-fixed": "#1a1c1a",
+                        "on-tertiary-container": "#425273",
+                        "on-surface": "#d9e2ff",
+                        "on-secondary-container": "#b5b5b2",
+                        "outline-variant": "#44474d",
+                        "primary-container": "#b9c7e4",
+                        "surface-dim": "#07122a",
+                        "error-container": "#93000a",
+                        "inverse-surface": "#d9e2ff",
+                        "on-secondary-fixed-variant": "#464745",
+                        "on-primary-container": "#45536b",
+                        "inverse-on-surface": "#263049",
+                        "on-primary-fixed": "#0d1c31",
+                        "error": "#ffb4ab",
+                        "surface-container-high": "#1f2942",
+                        "background": "#07122a",
+                        "tertiary-fixed": "#d8e2ff",
+                        "secondary-fixed-dim": "#c7c6c4",
+                        "outline": "#8f9097",
+                        "primary-fixed": "#d6e3ff",
+                        "tertiary-fixed-dim": "#b6c6ed",
+                        "surface-tint": "#b9c7e4",
+                        "primary-fixed-dim": "#b9c7e4",
+                        "inverse-primary": "#515f78",
+                        "tertiary-container": "#b6c6ed",
+                        "on-tertiary-fixed": "#091b39",
+                        "on-error": "#690005",
+                        "on-primary": "#233147",
+                        "surface-container-low": "#101b33",
+                        "tertiary": "#d7e2ff",
+                        "surface-variant": "#2a344e",
+                        "primary": "#d6e3ff",
+                        "outline-opaque": "rgba(217, 226, 255, 0.1)",
+                        "on-secondary": "#2f312f",
+                        "surface-container-highest": "#2a344e",
+                        "on-background": "#d9e2ff",
+                        "on-error-container": "#ffdad6"
+                    },
+                    fontFamily: {
+                        "headline-md": ["Plus Jakarta Sans"],
+                        "display-lg-mobile": ["Plus Jakarta Sans"],
+                        "mono-code": ["Geist"],
+                        "label-caps": ["Geist"],
+                        "body-base": ["Plus Jakarta Sans"],
+                        "display-lg": ["Plus Jakarta Sans"]
+                    },
+                    fontSize: {
+                        "headline-md": ["24px", { lineHeight: "1.3", letterSpacing: "-0.02em", fontWeight: "600" }],
+                        "display-lg-mobile": ["32px", { lineHeight: "1.2", letterSpacing: "-0.02em", fontWeight: "700" }],
+                        "mono-code": ["13px", { lineHeight: "1.6", letterSpacing: "0em", fontWeight: "400" }],
+                        "label-caps": ["12px", { lineHeight: "1", letterSpacing: "0.1em", fontWeight: "500" }],
+                        "body-base": ["16px", { lineHeight: "1.6", letterSpacing: "0em", fontWeight: "400" }],
+                        "display-lg": ["48px", { lineHeight: "1.1", letterSpacing: "-0.04em", fontWeight: "700" }]
+                    },
+                    spacing: {
+                        "gutter": "24px",
+                        "margin-desktop": "48px",
+                        "container-max": "1200px",
+                        "margin-mobile": "16px",
+                        "base": "8px",
+                        "section-gap": "128px"
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .vortex-bg {
+            background: radial-gradient(circle at center, rgba(185, 199, 228, 0.05) 0%, rgba(7, 18, 42, 1) 70%);
+        }
+        
+        @keyframes pulse-slow {
+            0%, 100% { opacity: 0.8; transform: scale(1) translateY(0); }
+            50% { opacity: 1; transform: scale(1.02) translateY(-10px); }
+        }
+        
+        .pulse-head {
+            animation: pulse-slow 6s ease-in-out infinite;
+        }
+
+        @keyframes scanline {
+            0% { transform: translateY(-100%); }
+            100% { transform: translateY(100vh); }
+        }
+
+        .scanline-effect {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background: linear-gradient(to bottom, transparent, rgba(214, 227, 255, 0.3), transparent);
+            animation: scanline 6s linear infinite;
+            pointer-events: none;
+            z-index: 50;
+        }
+
+        .module-item {
+            position: relative;
+            padding-left: 1rem;
+        }
+        
+        .module-item::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 4px;
+            height: 4px;
+            background-color: theme('colors.primary');
+            border-radius: 50%;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+
+        .cursor-blink {
+            animation: blink 1s step-end infinite;
+        }
+
+        .interactive-head-container {
+            transition: transform 0.1s ease-out;
+            transform-style: preserve-3d;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background min-h-screen overflow-hidden flex flex-col antialiased">
+<!-- Navigation intentionally suppressed due to transactional loading intent -->
+<main class="flex-grow flex flex-col items-center justify-center relative w-full h-full vortex-bg min-h-screen">
+<!-- Dense Swarm Canvas -->
+<canvas class="absolute inset-0 z-0 opacity-30 pointer-events-none" id="swarmCanvas"></canvas>
+<!-- Scanline Overlay -->
+<div class="scanline-effect"></div>
+<div class="absolute top-8 left-8 font-mono-code text-[10px] text-primary/60 flex flex-col items-start gap-1 z-20">
+<div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-primary animate-pulse"></span><span>CORE_SYNC_STATUS</span></div>
+<div class="text-on-surface-variant/40">STABLE / 0.002% ERR</div>
+<div class="w-24 h-[1px] bg-outline-variant/30 mt-1"></div>
+</div>
+<div class="absolute top-8 right-8 font-mono-code text-[10px] text-primary/60 flex flex-col items-end gap-1 z-20">
+<div class="flex items-center gap-2"><span>LATENCY MONITOR</span><span class="w-2 h-2 rounded-full bg-primary animate-pulse"></span></div>
+<div class="text-on-surface-variant/40">12.4ms AVG</div>
+<div class="w-24 h-[1px] bg-outline-variant/30 mt-1"></div>
+</div>
+<!-- Central Silhouette -->
+<div class="relative w-[300px] h-[400px] md:w-[400px] md:h-[500px] z-10 opacity-90 mix-blend-screen interactive-head-container pulse-head" id="interactive-cranium" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuAUtfhZ6Rl6vtqzC4jZYFMb3o5m9DK48ecODhfQgWBa2qn1SCbfWeH01xCIQtXXWkXT2qYttQ-o6zfFmpQL7zRyVamKDSS-pOQgv39ch9BdWoedcuJIGNseJD-vLSQHj38vT11Ns_uT3YE3S5CNUZbx6bKAaMCADmQjUXZDXkq3IyEQpPLs9SvNTvLOBoClhKxgUYhHVqtZPrek-Lq2SgT2nozU4PBzgaEEm4uMzLwL3lrTwl9xVTF81rrLZnkHZCDTMNv65t_awm4'); background-size: cover; background-position: center; filter: grayscale(100%) contrast(150%) brightness(1.2);">
+<!-- Hairline Frame -->
+<div class="absolute inset-0 border border-outline-variant/30 rounded-full blur-[2px]"></div>
+<!-- Data Swarm: Dense Orbiting Text Layers -->
+<div class="absolute inset-0 pointer-events-none transition-transform duration-100 ease-out" id="orbit-swarm">
+<!-- Core Dense Layers -->
+<div class="absolute inset-[-10px] border-b border-primary/10 rounded-full animate-[spin_10s_linear_infinite]"><div class="absolute -bottom-4 left-1/2 -translate-x-1/2 font-mono-code text-[6px] text-primary/60">0x1A_SYNC</div></div>
+<div class="absolute inset-[-20px] border-l border-primary/5 rounded-full animate-[spin_14s_linear_infinite_reverse]"><div class="absolute top-1/2 -left-8 -translate-y-1/2 font-mono-code text-[7px] text-on-surface-variant/40 -rotate-90">SENTIMENTS_CORE_v1.0</div></div>
+<div class="absolute inset-[-30px] border border-primary/5 rounded-full animate-[spin_18s_linear_infinite]"><div class="absolute -top-4 left-1/2 -translate-x-1/2 font-mono-code text-[6px] text-primary/30">FRONTAL_LOBE.VTX</div></div>
+<div class="absolute inset-[-40px] border-r border-outline-variant/10 rounded-full animate-[spin_22s_linear_infinite_reverse]"><div class="absolute top-1/2 -right-8 -translate-y-1/2 font-mono-code text-[8px] text-primary/40 rotate-90">0x8F2_ORBIT</div></div>
+<div class="absolute inset-[-50px] border-t border-primary/15 rounded-full animate-[spin_25s_linear_infinite]"><div class="absolute -top-4 left-1/2 -translate-x-1/2 font-mono-code text-[7px] text-primary/30">DATA_STREAM_ALPHA</div></div>
+<div class="absolute inset-[-60px] border-b border-primary/10 rounded-full animate-[spin_28s_linear_infinite_reverse]"><div class="absolute -bottom-4 left-1/2 -translate-x-1/2 font-mono-code text-[6px] text-on-surface-variant/30">HEX_SYNC</div></div>
+<div class="absolute inset-[-70px] border-l border-outline-variant/5 rounded-full animate-[spin_31s_linear_infinite]"><div class="absolute top-1/2 -left-8 -translate-y-1/2 font-mono-code text-[7px] text-on-surface-variant/30 -rotate-90">LATENT_SPACE_v2</div></div>
+<div class="absolute inset-[-80px] border border-primary/5 rounded-full animate-[spin_34s_linear_infinite_reverse]"><div class="absolute -bottom-4 left-1/2 -translate-x-1/2 font-mono-code text-[6px] text-primary/40">PARALLEL_SYNC</div></div>
+<div class="absolute inset-[-90px] border-r border-outline-variant/10 rounded-full animate-[spin_37s_linear_infinite]"><div class="absolute top-1/2 -right-8 -translate-y-1/2 font-mono-code text-[8px] text-primary/20 rotate-90">NEURAL_FLOW</div></div>
+<div class="absolute inset-[-100px] border-t border-primary/10 rounded-full animate-[spin_40s_linear_infinite_reverse]"><div class="absolute -top-4 left-1/2 -translate-x-1/2 font-mono-code text-[7px] text-on-surface-variant/20">NODE_LINK_0x44</div></div>
+<!-- Mid-Dense Layers -->
+<div class="absolute inset-[-110px] border-b border-outline-variant/5 rounded-full animate-[spin_43s_linear_infinite]"><div class="absolute -bottom-4 left-1/2 -translate-x-1/2 font-mono-code text-[6px] text-primary/25">SYNAPSE_MAP.04</div></div>
+<div class="absolute inset-[-120px] border-l border-primary/5 rounded-full animate-[spin_46s_linear_infinite_reverse]"><div class="absolute top-1/2 -left-8 -translate-y-1/2 font-mono-code text-[6px] text-on-surface-variant/40 -rotate-90">SYNAPSE_MAP_ACTIVE</div></div>
+<div class="absolute inset-[-130px] border border-outline-variant/5 rounded-full animate-[spin_49s_linear_infinite]"><div class="absolute -top-4 left-1/2 -translate-x-1/2 font-mono-code text-[8px] text-primary/20">NODE_ID_0x99F</div></div>
+<div class="absolute inset-[-140px] border-r border-primary/5 rounded-full animate-[spin_52s_linear_infinite_reverse]"><div class="absolute top-1/2 -right-8 -translate-y-1/2 font-mono-code text-[7px] text-primary/25 rotate-90">COGNITIVE_RESONANCE</div></div>
+<div class="absolute inset-[-150px] border-t border-outline-variant/10 rounded-full animate-[spin_55s_linear_infinite]"><div class="absolute -top-4 left-1/2 -translate-x-1/2 font-mono-code text-[6px] text-on-surface-variant/20">SEMANTIC_BUFFER_LOAD</div></div>
+<div class="absolute inset-[-160px] border-b border-primary/5 rounded-full animate-[spin_58s_linear_infinite_reverse]"><div class="absolute -bottom-4 left-1/2 -translate-x-1/2 font-mono-code text-[6px] text-primary/15">0x00A1F7_MEM_ALLOC</div></div>
+<div class="absolute inset-[-170px] border-l border-outline-variant/5 rounded-full animate-[spin_61s_linear_infinite]"><div class="absolute top-1/2 -left-8 -translate-y-1/2 font-mono-code text-[7px] text-on-surface-variant/15 -rotate-90">AFFECTIVE_COMPUTING</div></div>
+<div class="absolute inset-[-180px] border border-primary/5 rounded-full animate-[spin_64s_linear_infinite_reverse]"><div class="absolute -top-4 left-1/2 -translate-x-1/2 font-mono-code text-[6px] text-primary/10">SWARM_INTELLIGENCE</div></div>
+<div class="absolute inset-[-190px] border-r border-outline-variant/5 rounded-full animate-[spin_67s_linear_infinite]"><div class="absolute top-1/2 -right-8 -translate-y-1/2 font-mono-code text-[6px] text-primary/30 rotate-90">0xCC_BUFFER</div></div>
+<div class="absolute inset-[-200px] border-t border-primary/10 rounded-full animate-[spin_70s_linear_infinite_reverse]"><div class="absolute -top-4 left-1/2 -translate-x-1/2 font-mono-code text-[8px] text-primary/20">0xDEAD_BEEF</div></div>
+<!-- Outer Dense Layers -->
+<div class="absolute inset-[-210px] border-b border-outline-variant/5 rounded-full animate-[spin_73s_linear_infinite]"><div class="absolute -bottom-4 left-1/2 -translate-x-1/2 font-mono-code text-[6px] text-on-surface-variant/20">SYNAPSE_MAP.09</div></div>
+<div class="absolute inset-[-220px] border-l border-primary/5 rounded-full animate-[spin_76s_linear_infinite_reverse]"><div class="absolute top-1/2 -left-8 -translate-y-1/2 font-mono-code text-[7px] text-primary/15 -rotate-90">NEURAL_GATE_OPEN</div></div>
+<div class="absolute inset-[-230px] border border-outline-variant/5 rounded-full animate-[spin_79s_linear_infinite]"><div class="absolute -top-4 left-1/2 -translate-x-1/2 font-mono-code text-[6px] text-on-surface-variant/30">0xFF_NULL_POINTER</div></div>
+<div class="absolute inset-[-240px] border-r border-primary/10 rounded-full animate-[spin_82s_linear_infinite_reverse]"><div class="absolute top-1/2 -right-8 -translate-y-1/2 font-mono-code text-[6px] text-primary/25 rotate-90">QUANTUM_ENTANGLEMENT</div></div>
+<div class="absolute inset-[-250px] border-t border-outline-variant/5 rounded-full animate-[spin_85s_linear_infinite]"><div class="absolute -top-4 left-1/2 -translate-x-1/2 font-mono-code text-[7px] text-on-surface-variant/10">MEMORY_LEAK_DETECTED</div></div>
+<div class="absolute inset-[-260px] border-b border-primary/5 rounded-full animate-[spin_88s_linear_infinite_reverse]"><div class="absolute -bottom-4 left-1/2 -translate-x-1/2 font-mono-code text-[6px] text-primary/10">KERNEL_PANIC_BYPASS</div></div>
+<div class="absolute inset-[-270px] border-l border-outline-variant/10 rounded-full animate-[spin_91s_linear_infinite]"><div class="absolute top-1/2 -left-8 -translate-y-1/2 font-mono-code text-[6px] text-primary/20 -rotate-90">SYS_OVR_99.9</div></div>
+<div class="absolute inset-[-280px] border border-primary/5 rounded-full animate-[spin_94s_linear_infinite_reverse]"><div class="absolute -top-4 left-1/2 -translate-x-1/2 font-mono-code text-[6px] text-on-surface-variant/25">ECHO_CHAMBER_ACTIVE</div></div>
+<div class="absolute inset-[-290px] border-r border-outline-variant/5 rounded-full animate-[spin_97s_linear_infinite]"><div class="absolute top-1/2 -right-8 -translate-y-1/2 font-mono-code text-[7px] text-primary/15 rotate-90">VOID_SECTOR_7</div></div>
+<div class="absolute inset-[-300px] border-t border-primary/5 rounded-full animate-[spin_100s_linear_infinite_reverse]"><div class="absolute -top-4 left-1/2 -translate-x-1/2 font-mono-code text-[6px] text-on-surface-variant/20">SUBLIMINAL_INJECT</div></div>
+<div class="absolute inset-[-320px] border-b border-outline-variant/5 rounded-full animate-[spin_105s_linear_infinite]"><div class="absolute -bottom-4 left-1/2 -translate-x-1/2 font-mono-code text-[6px] text-primary/10">0x000_ROOT_ACCESS</div></div>
+<div class="absolute inset-[-340px] border-l border-primary/5 rounded-full animate-[spin_110s_linear_infinite_reverse]"><div class="absolute top-1/2 -left-8 -translate-y-1/2 font-mono-code text-[6px] text-on-surface-variant/15 -rotate-90">CORTEX_OVERRIDE</div></div>
+<div class="absolute inset-[-360px] border border-outline-variant/5 rounded-full animate-[spin_115s_linear_infinite]"><div class="absolute -top-4 left-1/2 -translate-x-1/2 font-mono-code text-[6px] text-primary/20">GHOST_IN_MACHINE</div></div>
+<div class="absolute inset-[-380px] border-r border-primary/5 rounded-full animate-[spin_120s_linear_infinite_reverse]"><div class="absolute top-1/2 -right-8 -translate-y-1/2 font-mono-code text-[6px] text-on-surface-variant/10 rotate-90">ORBITAL_DECAY_WARN</div></div>
+<div class="absolute inset-[-400px] border-t border-outline-variant/5 rounded-full animate-[spin_125s_linear_infinite]"><div class="absolute -top-4 left-1/2 -translate-x-1/2 font-mono-code text-[6px] text-primary/15">FINAL_FRONTIER_SYNC</div></div>
+</div>
+</div>
+<!-- Telemetry Layer (Perfectly Centered via Grid) -->
+<div class="absolute bottom-12 md:bottom-24 w-full px-8 md:px-margin-desktop grid grid-cols-1 md:grid-cols-3 items-end z-20 gap-8">
+<!-- Active Modules -->
+<div class="flex flex-col gap-3 font-mono-code text-mono-code text-on-surface-variant md:justify-self-start self-end">
+<div class="text-primary text-xs uppercase tracking-[0.2em] mb-2 border-b border-outline-variant/30 pb-1 w-max">Active Processes</div>
+<div class="module-item opacity-100">TOKEN_ALIGNMENT <span class="text-on-surface-variant/50 ml-2">[0x7A2]</span></div>
+<div class="module-item opacity-70">ENTITY_EXTRACTION <span class="text-on-surface-variant/50 ml-2">[0x1F4]</span></div>
+<div class="module-item opacity-40">SENTIMENT_VECTOR <span class="text-on-surface-variant/50 ml-2">[WAIT]</span></div>
+</div>
+<!-- Central Counter -->
+<div class="flex flex-col items-center justify-self-center self-end w-full text-center">
+<div class="font-display-lg text-display-lg text-on-surface tracking-tighter" id="loading-counter">63<span class="text-on-surface-variant/50">%</span></div>
+<div class="font-label-caps text-label-caps text-on-surface-variant tracking-widest mt-2 flex items-center justify-center">
+                    ANALYZING TOPOLOGY<span class="w-2 h-4 bg-primary inline-block ml-2 cursor-blink"></span>
+</div>
+<div class="mt-8 flex items-end justify-center gap-1 h-8 opacity-40">
+<div class="w-1 bg-primary h-2"></div>
+<div class="w-1 bg-primary h-4"></div>
+<div class="w-1 bg-primary h-6"></div>
+<div class="w-1 bg-primary h-3"></div>
+<div class="w-1 bg-primary h-5"></div>
+<div class="w-1 bg-primary h-8"></div>
+<div class="w-1 bg-primary h-4"></div>
+<div class="w-1 bg-primary h-2"></div>
+</div>
+<div class="text-[8px] font-mono-code text-primary/40 mt-1 uppercase tracking-widest text-center">Sentiment Vector Analysis</div>
+</div>
+<!-- System Status -->
+<div class="hidden md:flex flex-col items-end gap-1 font-mono-code text-[10px] leading-tight text-on-surface-variant/50 uppercase text-right md:justify-self-end self-end">
+<div>SYS.STATE: UNLOCKED</div>
+<div>LATENCY: 12ms</div>
+<div>MEM: 8.4GB / 16GB</div>
+<div>CORE.TEMP: OPTIMAL</div>
+</div>
+</div>
+<!-- Corner Accents -->
+<div class="absolute top-4 left-4 w-8 h-8 border-t border-l border-primary/20 pointer-events-none"></div>
+<div class="absolute top-4 right-4 w-8 h-8 border-t border-r border-primary/20 pointer-events-none"></div>
+<div class="absolute bottom-4 left-4 w-8 h-8 border-b border-l border-primary/20 pointer-events-none"></div>
+<div class="absolute bottom-4 right-4 w-8 h-8 border-b border-r border-primary/20 pointer-events-none"></div>
+</main>
+<script>
+        // Canvas background for dense swarm of text and hex codes
+        const canvas = document.getElementById('swarmCanvas');
+        const ctx = canvas.getContext('2d');
+        let width, height;
+
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        const chars = '0123456789ABCDEF0x<>{}[]$@#*'.split('');
+        const particles = [];
+        const particleCount = 200;
+
+        for(let i=0; i<particleCount; i++) {
+            particles.push({
+                x: Math.random() * width,
+                y: Math.random() * height,
+                char: chars[Math.floor(Math.random() * chars.length)],
+                speedX: (Math.random() - 0.5) * 0.4,
+                speedY: (Math.random() - 0.5) * 0.4,
+                size: Math.random() * 12 + 8,
+                opacity: Math.random() * 0.5 + 0.1
+            });
+        }
+
+        function drawSwarm() {
+            ctx.clearRect(0, 0, width, height);
+            particles.forEach(p => {
+                p.x += p.speedX;
+                p.y += p.speedY;
+                if(p.x < 0) p.x = width;
+                if(p.x > width) p.x = 0;
+                if(p.y < 0) p.y = height;
+                if(p.y > height) p.y = 0;
+                
+                ctx.fillStyle = `rgba(185, 199, 228, ${p.opacity})`;
+                ctx.font = `${p.size}px monospace`;
+                ctx.fillText(p.char, p.x, p.y);
+                
+                if(Math.random() < 0.02) p.char = chars[Math.floor(Math.random() * chars.length)];
+            });
+            requestAnimationFrame(drawSwarm);
+        }
+        drawSwarm();
+
+        // Simple script to animate the counter to simulate loading
+        document.addEventListener('DOMContentLoaded', () => {
+            const counterElement = document.getElementById('loading-counter');
+            let currentVal = 47;
+            
+            const interval = setInterval(() => {
+                if (currentVal < 99) {
+                    currentVal += Math.floor(Math.random() * 3) + 1;
+                    if(currentVal > 99) currentVal = 99;
+                    counterElement.innerHTML = `${currentVal}<span class="text-on-surface-variant/50">%</span>`;
+                }
+            }, 400);
+        });
+    </script>
+<script>
+        document.addEventListener('mousemove', (e) => { 
+            const cranium = document.getElementById('interactive-cranium'); 
+            const swarm = document.getElementById('orbit-swarm');
+            if (!cranium) return; 
+            
+            const { clientX, clientY } = e; 
+            const { innerWidth, innerHeight } = window; 
+            
+            // Enhanced interactive glance behavior (more pronounced 3D effect)
+            const moveX = (clientX - innerWidth / 2) / 30; 
+            const moveY = (clientY - innerHeight / 2) / 30; 
+            
+            cranium.style.transform = `perspective(1000px) rotateY(${moveX}deg) rotateX(${-moveY}deg)`; 
+            
+            if(swarm) {
+                const dist = Math.sqrt(Math.pow(clientX - innerWidth/2, 2) + Math.pow(clientY - innerHeight/2, 2));
+                const maxDist = Math.sqrt(Math.pow(innerWidth/2, 2) + Math.pow(innerHeight/2, 2));
+                const proximity = Math.max(0, 1 - (dist / maxDist));
+                swarm.style.transform = `scale(${1 + proximity * 0.05})`;
+            }
+        });
+    </script>
+</body></html>
