@@ -19,7 +19,8 @@ import xml.etree.ElementTree as ET
 import urllib.parse
 import warnings
 from typing import List
-from datetime import datetime
+from datetime import datetime, timedelta
+from email.utils import parsedate_to_datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
@@ -83,11 +84,12 @@ def _clean(s: str) -> str:
 # ─────────────────────────────────────────────────────────────
 # 1. Google News RSS (PALING RELIABLE — data XML murni)
 # ─────────────────────────────────────────────────────────────
-def _google_news_rss(keyword: str, limit: int) -> List[dict]:
+def _google_news_rss(keyword: str, limit: int, days_back: int = 7) -> List[dict]:
     """Google News RSS feed — tidak perlu scraping, murni XML."""
     results = []
-    query = urllib.parse.quote_plus(keyword)
-    url = f"https://news.google.com/rss/search?q={query}&hl=id&gl=ID&ceid=ID:id"
+    query      = urllib.parse.quote_plus(keyword)
+    after_date = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
+    url = f"https://news.google.com/rss/search?q={query}+after:{after_date}&hl=id&gl=ID&ceid=ID:id"
 
     try:
         r = requests.get(url, headers=_h(), timeout=TIMEOUT, verify=False)
@@ -104,7 +106,24 @@ def _google_news_rss(keyword: str, limit: int) -> List[dict]:
             text = f"{title}. {desc}".strip(". ") if desc and desc != title else title
             if len(text) < 10:
                 continue
-            results.append(_item(text, "google_news", link))
+
+            # Parse real publication date from RSS instead of using datetime.now()
+            date_str = datetime.now().strftime("%Y-%m-%d")
+            pub_date_el = item.find("pubDate")
+            if pub_date_el is not None and pub_date_el.text:
+                try:
+                    pub_dt   = parsedate_to_datetime(pub_date_el.text)
+                    date_str = pub_dt.strftime("%Y-%m-%d")
+                except Exception:
+                    pass
+
+            results.append({
+                "id":       str(uuid.uuid4()),
+                "source":   "google_news",
+                "raw_text": text.strip(),
+                "date":     date_str,
+                "url":      link,
+            })
 
     except Exception as e:
         logger.warning(f"Google News RSS: {e}")
@@ -323,12 +342,12 @@ async def _bing_playwright(keyword: str, limit: int) -> List[dict]:
 # ─────────────────────────────────────────────────────────────
 # Main entry point
 # ─────────────────────────────────────────────────────────────
-async def scrape_web_search(keyword: str, limit: int) -> List[dict]:
+async def scrape_web_search(keyword: str, limit: int, days_back: int = 7) -> List[dict]:
     """
     Scrape hasil pencarian dari berbagai sumber secara PARALEL.
     Sumber: Google News RSS + Yahoo + Detik + Kompas + Bing (Playwright)
     """
-    logger.info(f"Web search: '{keyword}' | target={limit}")
+    logger.info(f"Web search: '{keyword}' | target={limit} | days_back={days_back}")
     per_src = max(15, limit // 2)
 
     # Jalankan sumber requests secara paralel di thread pool
@@ -339,7 +358,7 @@ async def scrape_web_search(keyword: str, limit: int) -> List[dict]:
     # Thread-based (requests)
     with ThreadPoolExecutor(max_workers=4) as executor:
         futures = {
-            executor.submit(_google_news_rss, keyword, per_src): "google_news",
+            executor.submit(_google_news_rss, keyword, per_src, days_back): "google_news",
             executor.submit(_yahoo,           keyword, per_src): "yahoo",
             executor.submit(_detik,           keyword, per_src): "detik",
             executor.submit(_kompas,          keyword, per_src): "kompas",

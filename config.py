@@ -41,7 +41,7 @@ SCRAPER_ENDPOINT = "/scrape"
 # Dual-scraping (Twitter + web search paralel) bisa butuh 60-120 detik.
 # 300s = buffer aman agar pipeline tidak timeout sebelum scraper selesai.
 SCRAPER_TIMEOUT  = 300
-DEFAULT_SCRAPE_LIMIT = 100
+DEFAULT_SCRAPE_LIMIT = 200
 
 # --- Batch Processing ---
 BATCH_CHUNK_SIZE = 32  # Proses per-batch untuk efisiensi memori

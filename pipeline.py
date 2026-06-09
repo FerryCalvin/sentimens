@@ -129,7 +129,7 @@ def _scrape_in_process(keyword: str, limit: int, sources: list) -> list:
     return unique[:limit]
 
 
-def start_scrape_pipeline(keyword: str, limit: int, sources: list[str], mode: str = "demo") -> str:
+def start_scrape_pipeline(keyword: str, limit: int, sources: list[str], mode: str = "demo", days_back: int = 7) -> str:
     req_id = str(uuid.uuid4())
     _update_status(req_id, PENDING, "Mempersiapkan proses scraping...", 0, mode=mode)
     
@@ -144,7 +144,7 @@ def start_scrape_pipeline(keyword: str, limit: int, sources: list[str], mode: st
                 scraper_url = f"{SCRAPER_BASE_URL}{SCRAPER_ENDPOINT}"
                 response = httpx.post(
                     scraper_url,
-                    json={"keyword": keyword, "limit": limit, "sources": sources},
+                    json={"keyword": keyword, "limit": limit, "sources": sources, "days_back": days_back},
                     timeout=httpx.Timeout(
                         connect=10.0,   # Koneksi awal cepat (scraper harus sudah jalan)
                         read=300.0,     # FIX #1: Tunggu 5 menit untuk scraping selesai

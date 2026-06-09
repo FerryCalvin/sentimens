@@ -557,11 +557,16 @@ def api_scrape():
 
     sources = body.get("sources", ["twitter", "web"])
     mode = body.get("mode", "live")
+    try:
+        days_back = int(body.get("days_back", 7))
+        days_back = max(1, min(days_back, 30))
+    except (ValueError, TypeError):
+        days_back = 7
 
     # Pipeline punya fallback in-process jika scraper eksternal tidak tersedia
     from pipeline import start_scrape_pipeline
     try:
-        req_id = start_scrape_pipeline(keyword, limit, sources, mode=mode)
+        req_id = start_scrape_pipeline(keyword, limit, sources, mode=mode, days_back=days_back)
         return jsonify({"status": "ok", "req_id": req_id})
     except Exception as e:
         logger.error(f"/api/scrape pipeline error: {e}", exc_info=True)

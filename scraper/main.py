@@ -35,7 +35,7 @@ def run_async(coro):
         loop.close()
 
 
-async def _scrape_parallel(keyword: str, twitter_limit: int, web_limit: int, sources: list) -> dict:
+async def _scrape_parallel(keyword: str, twitter_limit: int, web_limit: int, sources: list, days_back: int = 7) -> dict:
     """
     Jalankan Twitter + web search secara PARALEL menggunakan asyncio.gather.
 
@@ -49,12 +49,11 @@ async def _scrape_parallel(keyword: str, twitter_limit: int, web_limit: int, sou
     labels = []
 
     if "twitter" in sources:
-        enriched_kw = f"{keyword} pendapat komentar opini"
-        tasks.append(scrape_twitter(keyword, twitter_limit))
+        tasks.append(scrape_twitter(keyword, twitter_limit, days_back=days_back))
         labels.append("twitter")
 
     if "web" in sources or "news" in sources:
-        tasks.append(scrape_web_search(keyword, web_limit))
+        tasks.append(scrape_web_search(keyword, web_limit, days_back=days_back))
         labels.append("web")
 
     if not tasks:
@@ -123,14 +122,16 @@ def scrape():
         if not data:
             return jsonify({"status": "error", "message": "No JSON body"}), 400
 
-        keyword = data.get("keyword", "").strip()
-        limit   = int(data.get("limit", 100))
-        sources = data.get("sources", ["twitter", "web"])
+        keyword   = data.get("keyword", "").strip()
+        limit     = int(data.get("limit", 200))
+        sources   = data.get("sources", ["twitter", "web"])
+        days_back = int(data.get("days_back", 7))
 
         if not keyword:
             return jsonify({"status": "error", "message": "keyword required"}), 400
 
-        limit = max(10, min(limit, 500))
+        limit     = max(10, min(limit, 500))
+        days_back = max(1, min(days_back, 30))
 
         # ── Bagi jatah ─────────────────────────────────────────────────
         # Twitter mendapat 100% dari limit sebagai sumber utama.
@@ -141,11 +142,11 @@ def scrape():
 
         logger.info(
             f"Scraping paralel | keyword='{keyword}' | "
-            f"target={limit} | twitter={twitter_limit} | web={web_limit}"
+            f"target={limit} | twitter={twitter_limit} | web={web_limit} | days_back={days_back}"
         )
 
         # Jalankan paralel
-        scraped = run_async(_scrape_parallel(keyword, twitter_limit, web_limit, sources))
+        scraped = run_async(_scrape_parallel(keyword, twitter_limit, web_limit, sources, days_back=days_back))
 
         twitter_results = scraped.get("twitter", [])
         web_results     = scraped.get("web", [])

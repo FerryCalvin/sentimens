@@ -110,7 +110,7 @@ def _build_playwright_cookies(raw_cookies: dict) -> list:
     return cookie_list
 
 
-async def scrape_twitter(keyword: str, limit: int) -> List[dict]:
+async def scrape_twitter(keyword: str, limit: int, days_back: int = 7) -> List[dict]:
     """
     Entry point utama.
     1. Coba inject cookie dari cookies_config.json
@@ -121,7 +121,7 @@ async def scrape_twitter(keyword: str, limit: int) -> List[dict]:
 
     if raw_cookies.get("auth_token") or raw_cookies.get("ct0"):
         logger.info("Cookies ditemukan — inject langsung ke browser (tanpa login form).")
-        results = await _scrape_with_cookies(keyword, limit, raw_cookies)
+        results = await _scrape_with_cookies(keyword, limit, raw_cookies, days_back=days_back)
         if results:
             logger.info(f"Twitter (cookie): {len(results)} tweet")
             return results
@@ -130,7 +130,7 @@ async def scrape_twitter(keyword: str, limit: int) -> List[dict]:
     # Fallback: session Playwright lama
     if SESSION_FILE.exists() and SESSION_FILE.stat().st_size > 1000:
         logger.info("Mencoba twitter_session.json (session lama)...")
-        results = await _scrape_with_session(keyword, limit)
+        results = await _scrape_with_session(keyword, limit, days_back=days_back)
         if results:
             return results
 
@@ -138,12 +138,13 @@ async def scrape_twitter(keyword: str, limit: int) -> List[dict]:
     return await _fallback_web_search(keyword, limit)
 
 
-async def _scrape_with_cookies(keyword: str, limit: int, raw_cookies: dict) -> List[dict]:
+async def _scrape_with_cookies(keyword: str, limit: int, raw_cookies: dict, days_back: int = 7) -> List[dict]:
     """
     Buka Chrome, inject cookies X, lalu scrape x.com/search.
     Tidak perlu buka halaman login sama sekali.
     """
     from playwright.async_api import async_playwright
+    from datetime import date, timedelta
 
     chrome_path = _find_chrome()
     if not chrome_path:
@@ -152,7 +153,14 @@ async def _scrape_with_cookies(keyword: str, limit: int, raw_cookies: dict) -> L
 
     playwright_cookies = _build_playwright_cookies(raw_cookies)
     encoded_kw = keyword.replace(" ", "%20")
-    search_url  = f"https://x.com/search?q={encoded_kw}&src=typed_query&f=live"
+    today      = date.today()
+    since_date = (today - timedelta(days=days_back)).isoformat()
+    until_date = today.isoformat()
+    search_url = (
+        f"https://x.com/search?q={encoded_kw}"
+        f"%20since%3A{since_date}%20until%3A{until_date}"
+        f"&src=typed_query&f=top"
+    )
 
     results: List[dict] = []
 
@@ -213,16 +221,24 @@ async def _scrape_with_cookies(keyword: str, limit: int, raw_cookies: dict) -> L
     return results
 
 
-async def _scrape_with_session(keyword: str, limit: int) -> List[dict]:
+async def _scrape_with_session(keyword: str, limit: int, days_back: int = 7) -> List[dict]:
     """Fallback: pakai Playwright storage_state lama."""
     from playwright.async_api import async_playwright
+    from datetime import date, timedelta
 
     chrome_path = _find_chrome()
     if not chrome_path:
         return []
 
     encoded_kw = keyword.replace(" ", "%20")
-    search_url  = f"https://x.com/search?q={encoded_kw}&src=typed_query&f=live"
+    today      = date.today()
+    since_date = (today - timedelta(days=days_back)).isoformat()
+    until_date = today.isoformat()
+    search_url = (
+        f"https://x.com/search?q={encoded_kw}"
+        f"%20since%3A{since_date}%20until%3A{until_date}"
+        f"&src=typed_query&f=top"
+    )
     results: List[dict] = []
 
     async with async_playwright() as p:
