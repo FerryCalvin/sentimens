@@ -45,7 +45,6 @@ Keunggulan vs form login:
 
 import asyncio
 import json
-import math
 import urllib.parse
 import uuid
 import logging
@@ -112,47 +111,6 @@ def _build_playwright_cookies(raw_cookies: dict) -> list:
     return cookie_list
 
 
-_ID_STOPWORDS = {
-    "di", "ke", "dari", "yang", "dan", "atau", "ini", "itu",
-    "pada", "dengan", "untuk", "oleh", "dalam", "adalah", "akan",
-    "juga", "sudah", "bisa", "ada", "tidak", "lebih", "sangat",
-    "saat", "agar", "karena", "sebagai", "dapat", "antara", "pun",
-    "itu", "ini", "ia", "dia", "kami", "kita", "mereka", "saya",
-}
-
-
-def _expand_keyword_for_twitter(keyword: str) -> str:
-    """
-    Expand a topic phrase into a Twitter OR-query using anchor-based 2-gram selection.
-
-    Only 2-grams where at least one token belongs to the first ⌈N/2⌉ tokens
-    (the "subject" half) are kept, preventing generic predicate phrases like
-    "turun tajam" from drifting away from the core entity.
-
-    Examples:
-      "BBRI"               → 'BBRI'              (unchanged, ≤2 tokens)
-      "saham bbri turun tajam" → '"saham bbri" OR "bbri turun"'
-    """
-    tokens = keyword.lower().split()
-    if len(tokens) <= 2:
-        return keyword
-
-    subject_size = math.ceil(len(tokens) / 2)
-    subject_tokens = set(tokens[:subject_size])
-
-    variants: list[str] = []
-    for i in range(len(tokens) - 1):
-        t0, t1 = tokens[i], tokens[i + 1]
-        both_stopwords = t0 in _ID_STOPWORDS and t1 in _ID_STOPWORDS
-        anchored = t0 in subject_tokens or t1 in subject_tokens
-        if not both_stopwords and anchored:
-            variants.append(f'"{t0} {t1}"')
-        if len(variants) == 4:
-            break
-
-    return " OR ".join(variants) if variants else keyword
-
-
 async def scrape_twitter(keyword: str, limit: int, days_back: int = 7) -> List[dict]:
     """
     Entry point utama.
@@ -160,10 +118,7 @@ async def scrape_twitter(keyword: str, limit: int, days_back: int = 7) -> List[d
     2. Fallback: pakai session Playwright lama (twitter_session.json)
     3. Fallback akhir: web search
     """
-    twitter_query = _expand_keyword_for_twitter(keyword)
-    if twitter_query != keyword:
-        logger.info(f"Keyword expanded: {keyword!r} → {twitter_query!r}")
-
+    twitter_query = keyword
     raw_cookies = _load_cookies()
 
     if raw_cookies.get("auth_token") or raw_cookies.get("ct0"):

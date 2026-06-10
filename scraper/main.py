@@ -150,8 +150,13 @@ def scrape():
             f"target={limit} | twitter={twitter_limit} | web={web_limit} | days_back={days_back}"
         )
 
+        # LLM-based query expansion — expands keyword with synonyms/slang before scraping.
+        # Falls back silently to original keyword if OpenRouter is unreachable.
+        from query_expansion import expand_query
+        expanded_keyword = expand_query(keyword)
+
         # Jalankan paralel
-        scraped = run_async(_scrape_parallel(keyword, twitter_limit, web_limit, sources, days_back=days_back))
+        scraped = run_async(_scrape_parallel(expanded_keyword, twitter_limit, web_limit, sources, days_back=days_back))
 
         twitter_results = scraped.get("twitter", [])
         web_results     = scraped.get("web", [])
