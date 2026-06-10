@@ -92,12 +92,18 @@ echo.
 echo  Stopping servers...
 
 for /f "tokens=5" %%P in ('netstat -ano 2^>nul ^| findstr ":%FLASK_PORT% " ^| findstr "LISTENING"') do (
-    echo  [OK] Stopping Flask App (PID %%P)
-    taskkill /PID %%P /F >nul 2>&1
+    set /a "PID=%%P" 2>nul
+    if !PID! GTR 0 (
+        echo  [OK] Stopping Flask App (PID !PID!)
+        taskkill /PID !PID! /T /F >nul 2>&1
+    )
 )
 for /f "tokens=5" %%P in ('netstat -ano 2^>nul ^| findstr ":%SCRAPER_PORT% " ^| findstr "LISTENING"') do (
-    echo  [OK] Stopping Scraper  (PID %%P)
-    taskkill /PID %%P /F >nul 2>&1
+    set /a "PID=%%P" 2>nul
+    if !PID! GTR 0 (
+        echo  [OK] Stopping Scraper  (PID !PID!)
+        taskkill /PID !PID! /T /F >nul 2>&1
+    )
 )
 
 echo  Done. All servers stopped.

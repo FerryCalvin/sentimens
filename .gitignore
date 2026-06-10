@@ -15,3 +15,5 @@ models/
 
 # Data
 data/*.csv
+data
+datasets_verif

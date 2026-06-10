@@ -41,7 +41,8 @@ SCRAPER_ENDPOINT = "/scrape"
 # Dual-scraping (Twitter + web search paralel) bisa butuh 60-120 detik.
 # 300s = buffer aman agar pipeline tidak timeout sebelum scraper selesai.
 SCRAPER_TIMEOUT  = 300
-DEFAULT_SCRAPE_LIMIT = 200
+DEFAULT_SCRAPE_LIMIT = int(os.getenv("SCRAPE_LIMIT", "200"))
+DEFAULT_DAYS_BACK    = int(os.getenv("DAYS_BACK",    "7"))
 
 # --- Batch Processing ---
 BATCH_CHUNK_SIZE = 32  # Proses per-batch untuk efisiensi memori

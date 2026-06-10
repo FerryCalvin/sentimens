@@ -13,6 +13,11 @@ import asyncio
 import logging
 import sys
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
+_DEFAULT_LIMIT     = int(os.getenv("SCRAPE_LIMIT", "200"))
+_DEFAULT_DAYS_BACK = int(os.getenv("DAYS_BACK",    "7"))
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -123,9 +128,9 @@ def scrape():
             return jsonify({"status": "error", "message": "No JSON body"}), 400
 
         keyword   = data.get("keyword", "").strip()
-        limit     = int(data.get("limit", 200))
+        limit     = int(data.get("limit",     _DEFAULT_LIMIT))
         sources   = data.get("sources", ["twitter", "web"])
-        days_back = int(data.get("days_back", 7))
+        days_back = int(data.get("days_back", _DEFAULT_DAYS_BACK))
 
         if not keyword:
             return jsonify({"status": "error", "message": "keyword required"}), 400

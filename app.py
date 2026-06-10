@@ -30,6 +30,7 @@ from config import (
     SCRAPER_ENDPOINT,
     SCRAPER_TIMEOUT,
     DEFAULT_SCRAPE_LIMIT,
+    DEFAULT_DAYS_BACK,
     LABEL_COLORS,
 )
 from preprocessing import preprocess_text, get_word_frequencies, is_valid_text
@@ -80,7 +81,12 @@ except Exception as e:
 @app.route("/", methods=["GET"])
 def index():
     """Halaman utama dengan form analisis teks tunggal."""
-    return render_template("index.html", model_loaded=MODEL_LOADED)
+    return render_template(
+        "index.html",
+        model_loaded=MODEL_LOADED,
+        default_limit=DEFAULT_SCRAPE_LIMIT,
+        default_days_back=DEFAULT_DAYS_BACK,
+    )
 
 
 @app.route("/analyze", methods=["POST"])
@@ -558,10 +564,10 @@ def api_scrape():
     sources = body.get("sources", ["twitter", "web"])
     mode = body.get("mode", "live")
     try:
-        days_back = int(body.get("days_back", 7))
+        days_back = int(body.get("days_back", DEFAULT_DAYS_BACK))
         days_back = max(1, min(days_back, 30))
     except (ValueError, TypeError):
-        days_back = 7
+        days_back = DEFAULT_DAYS_BACK
 
     # Pipeline punya fallback in-process jika scraper eksternal tidak tersedia
     from pipeline import start_scrape_pipeline

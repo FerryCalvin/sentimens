@@ -45,6 +45,8 @@ Keunggulan vs form login:
 
 import asyncio
 import json
+import math
+import urllib.parse
 import uuid
 import logging
 import random
@@ -110,6 +112,47 @@ def _build_playwright_cookies(raw_cookies: dict) -> list:
     return cookie_list
 
 
+_ID_STOPWORDS = {
+    "di", "ke", "dari", "yang", "dan", "atau", "ini", "itu",
+    "pada", "dengan", "untuk", "oleh", "dalam", "adalah", "akan",
+    "juga", "sudah", "bisa", "ada", "tidak", "lebih", "sangat",
+    "saat", "agar", "karena", "sebagai", "dapat", "antara", "pun",
+    "itu", "ini", "ia", "dia", "kami", "kita", "mereka", "saya",
+}
+
+
+def _expand_keyword_for_twitter(keyword: str) -> str:
+    """
+    Expand a topic phrase into a Twitter OR-query using anchor-based 2-gram selection.
+
+    Only 2-grams where at least one token belongs to the first ⌈N/2⌉ tokens
+    (the "subject" half) are kept, preventing generic predicate phrases like
+    "turun tajam" from drifting away from the core entity.
+
+    Examples:
+      "BBRI"               → 'BBRI'              (unchanged, ≤2 tokens)
+      "saham bbri turun tajam" → '"saham bbri" OR "bbri turun"'
+    """
+    tokens = keyword.lower().split()
+    if len(tokens) <= 2:
+        return keyword
+
+    subject_size = math.ceil(len(tokens) / 2)
+    subject_tokens = set(tokens[:subject_size])
+
+    variants: list[str] = []
+    for i in range(len(tokens) - 1):
+        t0, t1 = tokens[i], tokens[i + 1]
+        both_stopwords = t0 in _ID_STOPWORDS and t1 in _ID_STOPWORDS
+        anchored = t0 in subject_tokens or t1 in subject_tokens
+        if not both_stopwords and anchored:
+            variants.append(f'"{t0} {t1}"')
+        if len(variants) == 4:
+            break
+
+    return " OR ".join(variants) if variants else keyword
+
+
 async def scrape_twitter(keyword: str, limit: int, days_back: int = 7) -> List[dict]:
     """
     Entry point utama.
@@ -117,11 +160,15 @@ async def scrape_twitter(keyword: str, limit: int, days_back: int = 7) -> List[d
     2. Fallback: pakai session Playwright lama (twitter_session.json)
     3. Fallback akhir: web search
     """
+    twitter_query = _expand_keyword_for_twitter(keyword)
+    if twitter_query != keyword:
+        logger.info(f"Keyword expanded: {keyword!r} → {twitter_query!r}")
+
     raw_cookies = _load_cookies()
 
     if raw_cookies.get("auth_token") or raw_cookies.get("ct0"):
         logger.info("Cookies ditemukan — inject langsung ke browser (tanpa login form).")
-        results = await _scrape_with_cookies(keyword, limit, raw_cookies, days_back=days_back)
+        results = await _scrape_with_cookies(twitter_query, limit, raw_cookies, days_back=days_back)
         if results:
             logger.info(f"Twitter (cookie): {len(results)} tweet")
             return results
@@ -130,7 +177,7 @@ async def scrape_twitter(keyword: str, limit: int, days_back: int = 7) -> List[d
     # Fallback: session Playwright lama
     if SESSION_FILE.exists() and SESSION_FILE.stat().st_size > 1000:
         logger.info("Mencoba twitter_session.json (session lama)...")
-        results = await _scrape_with_session(keyword, limit, days_back=days_back)
+        results = await _scrape_with_session(twitter_query, limit, days_back=days_back)
         if results:
             return results
 
@@ -152,13 +199,12 @@ async def _scrape_with_cookies(keyword: str, limit: int, raw_cookies: dict, days
         return []
 
     playwright_cookies = _build_playwright_cookies(raw_cookies)
-    encoded_kw = keyword.replace(" ", "%20")
     today      = date.today()
     since_date = (today - timedelta(days=days_back)).isoformat()
     until_date = today.isoformat()
+    full_query = f"{keyword} since:{since_date} until:{until_date}"
     search_url = (
-        f"https://x.com/search?q={encoded_kw}"
-        f"%20since%3A{since_date}%20until%3A{until_date}"
+        f"https://x.com/search?q={urllib.parse.quote(full_query)}"
         f"&src=typed_query&f=top"
     )
 
@@ -230,13 +276,12 @@ async def _scrape_with_session(keyword: str, limit: int, days_back: int = 7) -> 
     if not chrome_path:
         return []
 
-    encoded_kw = keyword.replace(" ", "%20")
     today      = date.today()
     since_date = (today - timedelta(days=days_back)).isoformat()
     until_date = today.isoformat()
+    full_query = f"{keyword} since:{since_date} until:{until_date}"
     search_url = (
-        f"https://x.com/search?q={encoded_kw}"
-        f"%20since%3A{since_date}%20until%3A{until_date}"
+        f"https://x.com/search?q={urllib.parse.quote(full_query)}"
         f"&src=typed_query&f=top"
     )
     results: List[dict] = []

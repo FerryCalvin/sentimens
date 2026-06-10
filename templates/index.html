@@ -8,6 +8,12 @@
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700&amp;family=Geist:wght@400;500&amp;display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+  window.APP_CONFIG = {
+    limit:    parseInt("{{ default_limit }}", 10) || 200,
+    daysBack: parseInt("{{ default_days_back }}", 10) || 7
+  };
+</script>
 <script id="tailwind-config">
   tailwind.config = {
     darkMode: "class",
@@ -157,6 +163,23 @@
             background-color: #07122a;
             color: #d9e2ff;
             overflow-x: hidden;
+        }
+
+        /* Custom Scrollbar for Dataset Table */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: rgba(217, 226, 255, 0.05); 
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: rgba(217, 226, 255, 0.2); 
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: rgba(217, 226, 255, 0.4); 
         }
         
         #semantic-chatter-container {
@@ -427,6 +450,27 @@
 <canvas id="doughnutChart"></canvas>
 </div>
 </div>
+
+<!-- Data Table View -->
+<div class="chart-container col-span-1 md:col-span-2 lg:col-span-3">
+    <h3 class="font-label-caps text-label-caps text-on-surface-variant mb-4 uppercase">Scraped Dataset Preview</h3>
+    <div class="overflow-x-auto max-h-96 custom-scrollbar">
+        <table class="w-full text-left font-body-base text-sm border-collapse" id="datasetTable">
+            <thead class="sticky top-0 bg-[#151f37] z-10 text-primary">
+                <tr>
+                    <th class="p-3 border-b border-outline-variant/30 font-semibold whitespace-nowrap">Date</th>
+                    <th class="p-3 border-b border-outline-variant/30 font-semibold whitespace-nowrap">Source</th>
+                    <th class="p-3 border-b border-outline-variant/30 font-semibold w-1/2">Text</th>
+                    <th class="p-3 border-b border-outline-variant/30 font-semibold whitespace-nowrap">Label</th>
+                    <th class="p-3 border-b border-outline-variant/30 font-semibold whitespace-nowrap">Conf (Pos/Neg/Neu)</th>
+                </tr>
+            </thead>
+            <tbody id="datasetTableBody" class="text-on-surface-variant divide-y divide-outline-variant/10">
+                <!-- Rows injected here via JS -->
+            </tbody>
+        </table>
+    </div>
+</div>
 </div>
 </div>
 <!-- Batch CSV View (Placeholder) -->
@@ -506,7 +550,7 @@
         </div>
     </div>
     <!-- Telemetry Layer (Perfectly Centered via Grid) -->
-    <div class="absolute bottom-12 md:bottom-24 w-full px-8 md:px-margin-desktop grid grid-cols-1 md:grid-cols-3 items-end z-20 gap-8">
+    <div class="absolute bottom-4 md:bottom-8 w-full px-8 md:px-margin-desktop grid grid-cols-1 md:grid-cols-3 items-end z-20 gap-8">
         <!-- Active Modules -->
         <div class="flex flex-col gap-3 font-mono-code text-mono-code text-on-surface-variant md:justify-self-start self-end">
             <div class="text-primary text-xs uppercase tracking-[0.2em] mb-2 border-b border-outline-variant/30 pb-1 w-max">Active Processes</div>
@@ -1162,12 +1206,13 @@
             newBtn.disabled = true;
 
             try {
-                const limit = document.getElementById('toggle-view-btn') && !isPrecomputedView ? 50 : 100;
+                const limit    = (window.APP_CONFIG && window.APP_CONFIG.limit)    || 200;
+                const daysBack = (window.APP_CONFIG && window.APP_CONFIG.daysBack) || 7;
                 const mode = isPrecomputedView ? "demo" : "live";
                 const res  = await fetch('/api/scrape', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ keyword: text, limit: 50, sources: ['twitter', 'news'], mode: "live" })
+                    body: JSON.stringify({ keyword: text, limit: limit, days_back: daysBack, sources: ['twitter', 'web'], mode: "live" })
                 });
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.error || 'Gagal memulai analisis');
@@ -1484,6 +1529,32 @@
             },
             options: { ...commonOptions, cutout: '70%' }
         });
+
+        // Populate Data Table
+        const tbody = document.getElementById('datasetTableBody');
+        if (tbody) {
+            tbody.innerHTML = '';
+            const results = apiData.results || [];
+            results.forEach(row => {
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-on-surface/5 transition-colors';
+                
+                let labelColor = '#c5c6cd';
+                let lbl = row.predicted_label ? row.predicted_label.toLowerCase() : '';
+                if (lbl.includes('positif')) labelColor = '#d9e2ff';
+                else if (lbl.includes('negatif')) labelColor = '#ffb4ab';
+                else labelColor = '#515f78';
+                
+                tr.innerHTML = `
+                    <td class="p-3 whitespace-nowrap text-xs text-on-surface/60">${row.date || '-'}</td>
+                    <td class="p-3 whitespace-nowrap text-xs font-mono-code">${row.source || '-'}</td>
+                    <td class="p-3 text-sm leading-relaxed">${row.raw_text || row.text || '-'}</td>
+                    <td class="p-3 whitespace-nowrap font-semibold" style="color: ${labelColor}">${row.predicted_label || '-'}</td>
+                    <td class="p-3 whitespace-nowrap text-xs font-mono-code">${(row.confidence_positive || 0).toFixed(2)} / ${(row.confidence_negative || 0).toFixed(2)} / ${(row.confidence_neutral || 0).toFixed(2)}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
 
         _chartsCreated = true;
     }
