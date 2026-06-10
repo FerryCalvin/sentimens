@@ -5,11 +5,12 @@ Converts a raw user keyword into a focused Boolean search query
 using a language model, preserving the core topic while adding
 genuine Indonesian synonyms and slang.
 
-Failsafe: any network error, timeout, or API failure silently
-falls back to the original keyword — the scraper is never blocked.
+Uses the official `openrouter` Python SDK (pip install openrouter).
+Failsafe: any error or timeout silently falls back to the original
+keyword — the scraper is never blocked.
 """
 import os
-import requests
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -47,39 +48,38 @@ _SYSTEM_PROMPT = (
 
 def expand_query(original_keyword: str) -> str:
     """
-    Expand *original_keyword* into a Boolean search query via OpenRouter.
-    Returns *original_keyword* unchanged on any failure (timeout, API error, etc.).
+    Expand *original_keyword* into a Boolean search query via OpenRouter SDK.
+    Returns *original_keyword* unchanged on any failure or timeout.
     """
     api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
     if not api_key:
         print("[QueryExpander] OPENROUTER_API_KEY not set — using original keyword.")
         return original_keyword
 
-    model = os.getenv("OPENROUTER_MODEL", "google/gemma-3-27b-it:free").strip()
+    model = os.getenv("OPENROUTER_MODEL", "openrouter/auto").strip()
 
-    try:
-        resp = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "HTTP-Referer": "http://localhost:5000",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": model,
-                "messages": [
+    def _call() -> str:
+        from openrouter import OpenRouter
+        with OpenRouter(api_key=api_key) as client:
+            resp = client.chat.send(
+                model=model,
+                messages=[
                     {"role": "system", "content": _SYSTEM_PROMPT},
                     {"role": "user",   "content": original_keyword},
                 ],
-                "temperature": 0.3,
-            },
-            timeout=3,
-        )
-        resp.raise_for_status()
-        expanded = resp.json()["choices"][0]["message"]["content"].strip()
+                temperature=0.3,
+            )
+            return resp.choices[0].message.content.strip()
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as ex:
+            expanded = ex.submit(_call).result(timeout=3)
         if expanded:
             print(f"[QueryExpander] '{original_keyword}' → '{expanded}'")
             return expanded
+        return original_keyword
+    except FutureTimeout:
+        print("[QueryExpander] Timeout (3s) — using original keyword.")
         return original_keyword
     except Exception as e:
         print(f"[QueryExpander] Fallback to original keyword ({type(e).__name__}: {e})")
