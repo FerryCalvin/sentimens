@@ -8,6 +8,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700&amp;family=Geist:wght@400;500&amp;display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/wordcloud@1.2.2/src/wordcloud2.js"></script>
 <script>
   window.APP_CONFIG = {
     limit:    parseInt("{{ default_limit }}", 10) || 200,
@@ -291,6 +292,24 @@
             padding: 1rem;
         }
 
+        .time-filter-btn {
+            padding: 4px 14px;
+            border-radius: 9999px;
+            border: 1px solid rgba(143, 144, 151, 0.3);
+            color: #8f9097;
+            font-size: 0.75rem;
+            font-family: 'Geist', monospace;
+            cursor: pointer;
+            background: transparent;
+            transition: background 0.15s, border-color 0.15s, color 0.15s;
+        }
+        .time-filter-btn:hover,
+        .time-filter-btn.active {
+            background: rgba(217, 226, 255, 0.1);
+            border-color: #d9e2ff;
+            color: #d9e2ff;
+        }
+
         /* Loading Screen Styles */
         .loading-view {
             transition: opacity 0.5s ease;
@@ -421,31 +440,41 @@
                 </button>
 </div>
 </div>
+<!-- Time Period Filter Bar -->
+<div class="flex items-center gap-2 mb-4 flex-wrap" id="time-filter-bar">
+  <span class="text-xs text-on-surface-variant uppercase font-label-caps self-center">Periode:</span>
+  <button class="time-filter-btn active" data-days="all">Semua</button>
+  <button class="time-filter-btn" data-days="365">1 Tahun</button>
+  <button class="time-filter-btn" data-days="30">30 Hari</button>
+  <button class="time-filter-btn" data-days="7">7 Hari</button>
+  <button class="time-filter-btn" data-days="1">1 Hari</button>
+</div>
 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-<!-- Sentiment Timeline -->
-<div class="chart-container col-span-1 md:col-span-2">
+<!-- Sentiment Timeline — full width -->
+<div class="chart-container col-span-1 md:col-span-2 lg:col-span-3">
 <h3 class="font-label-caps text-label-caps text-on-surface-variant mb-4 uppercase">Sentiment Timeline</h3>
 <div class="h-64 relative w-full">
 <canvas id="timelineChart"></canvas>
 </div>
 </div>
-<!-- Model Performance -->
+<!-- Word Cloud -->
 <div class="chart-container col-span-1">
-<h3 class="font-label-caps text-label-caps text-on-surface-variant mb-4 uppercase">Model Performance</h3>
-<div class="h-64 relative w-full flex justify-center">
-<canvas id="radarChart"></canvas>
+<h3 class="font-label-caps text-label-caps text-on-surface-variant mb-4 uppercase">Kata Dominan</h3>
+<div class="h-64 relative w-full flex justify-center items-center" id="wordcloud-container">
+  <canvas id="wordCloudCanvas"></canvas>
+  <p id="wordcloud-empty" class="text-on-surface-variant text-sm" style="display:none;">Tidak ada data teks.</p>
 </div>
 </div>
-<!-- Engagement Heatmap (Simulated with Bar) -->
-<div class="chart-container col-span-1 lg:col-span-2">
-<h3 class="font-label-caps text-label-caps text-on-surface-variant mb-4 uppercase">Engagement Intensity</h3>
-<div class="h-64 relative w-full">
-<canvas id="barChart"></canvas>
-</div>
-</div>
-<!-- Overall Score -->
+<!-- Confusion Matrix (static) -->
 <div class="chart-container col-span-1">
-<h3 class="font-label-caps text-label-caps text-on-surface-variant mb-4 uppercase">Overall Distribution</h3>
+<h3 class="font-label-caps text-label-caps text-on-surface-variant mb-4 uppercase">Confusion Matrix</h3>
+<div class="h-64 relative w-full flex justify-center items-center">
+  <img src="/static/confusion_matrix.png" alt="Confusion Matrix" class="max-h-full max-w-full object-contain rounded"/>
+</div>
+</div>
+<!-- Distribusi Sentimen -->
+<div class="chart-container col-span-1">
+<h3 class="font-label-caps text-label-caps text-on-surface-variant mb-4 uppercase">Distribusi Sentimen</h3>
 <div class="h-64 relative w-full flex justify-center">
 <canvas id="doughnutChart"></canvas>
 </div>
@@ -754,56 +783,8 @@
                 options: { ...commonOptions, scales: { x: { grid: { color: 'rgba(143, 144, 151, 0.1)' } }, y: { grid: { color: 'rgba(143, 144, 151, 0.1)' } } } }
             });
 
-            // Model Performance Chart (dummy data)
-            new Chart(document.getElementById('radarChart'), {
-                type: 'bar',
-                data: {
-                    labels: ['Accuracy', 'Precision', 'Recall', 'F1-Score'],
-                    datasets: [{
-                        label: 'Model Metrics (%)',
-                        data: [85, 82, 88, 85],
-                        backgroundColor: ['#28a745', '#17a2b8', '#ffc107', '#6f42c1'],
-                        borderRadius: 4
-                    }]
-                },
-                options: {
-                    ...commonOptions,
-                    plugins: {
-                        ...commonOptions.plugins,
-                        legend: { display: false }
-                    },
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            max: 100,
-                            grid: { color: 'rgba(143,144,151,0.1)' }
-                        },
-                        x: {
-                            grid: { display: false }
-                        }
-                    }
-                }
-            });
-
-            // Bar Chart (Engagement)
-            new Chart(document.getElementById('barChart'), {
-                type: 'bar',
-                data: {
-                    labels: ['Topic A', 'Topic B', 'Topic C', 'Topic D', 'Topic E', 'Topic F'],
-                    datasets: [{
-                        label: 'Volume',
-                        data: [120, 190, 300, 250, 200, 150],
-                        backgroundColor: '#515f78',
-                        borderRadius: 4
-                    }, {
-                        label: 'Intensity',
-                        data: [80, 150, 200, 180, 160, 110],
-                        backgroundColor: '#2a344e',
-                        borderRadius: 4
-                    }]
-                },
-                options: { ...commonOptions, scales: { x: { grid: { display: false } }, y: { grid: { color: 'rgba(143, 144, 151, 0.1)' } } } }
-            });
+            // Word cloud placeholder shown while results load
+            renderWordCloud([]);
 
             // Doughnut Chart
             new Chart(document.getElementById('doughnutChart'), {
@@ -1293,10 +1274,10 @@
                 function startSmoothProgress(serverProgress, status) {
                     if (_smoothTimer) clearInterval(_smoothTimer);
                     const targets = { SCRAPING: 45, INFERENCING: 90, FINALIZING: 98 };
-                    const target = targets[status] || serverProgress;
+                    const target = Math.max(targets[status] || serverProgress, serverProgress);
                     _smoothTimer = setInterval(() => {
                         const lCounterVal = document.getElementById('loading-counter-val');
-                        if (_displayedProgress < target && _displayedProgress < serverProgress + 8) {
+                        if (_displayedProgress < target) {
                             _displayedProgress = Math.min(_displayedProgress + 0.4, target);
                             if (lCounterVal) lCounterVal.textContent = Math.round(_displayedProgress);
                         } else {
@@ -1377,10 +1358,12 @@
                                             negative_count: finalData.summary?.negative_count ?? finalData.distribution?.negative ?? 0,
                                         },
                                         timeline:       finalData.timeline       || [],
+                                        word_freq:      finalData.word_freq      || [],
                                         confidence_avg: finalData.confidence_avg || { positive: 0, neutral: 0, negative: 0 },
                                         model_metrics:  finalData.model_metrics  || {},
                                         results:        finalData.top_items      || [],
                                     };
+                                    currentAnalysisReqId = reqId;
                                     showView('analysis');
                                     initChartsWithData(mappedData);
                                     newBtn.innerHTML = origHTML;
@@ -1444,11 +1427,112 @@
     // Override initCharts agar pakai data nyata dari API
     let _chartsCreated = false;
     let _chartInstances = {};
+    let currentAnalysisReqId = null;
+    let activeFilterDays = 'all';
+
+    // --- Time Filter ---
+    function _setActiveFilterBtn(days) {
+        document.querySelectorAll('.time-filter-btn').forEach(b => {
+            b.classList.toggle('active', b.dataset.days === days);
+        });
+        activeFilterDays = days;
+    }
+
+    async function updateChartsForPeriod(days) {
+        if (!currentAnalysisReqId) return;
+        const url = days === 'all'
+            ? `/api/results/${currentAnalysisReqId}`
+            : `/api/results/${currentAnalysisReqId}?days=${days}`;
+        try {
+            const resp = await fetch(url);
+            if (!resp.ok) return;
+            const data = await resp.json();
+            updateTimelineChart(data.timeline || []);
+            renderWordCloud(data.word_freq || []);
+            updateDoughnutChart(data.summary || {});
+        } catch (e) {
+            console.error('Filter update failed', e);
+        }
+    }
+
+    document.querySelectorAll('.time-filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const days = btn.dataset.days;
+            if (days === activeFilterDays) return;
+            _setActiveFilterBtn(days);
+            updateChartsForPeriod(days);
+        });
+    });
+
+    // --- Word Cloud ---
+    function renderWordCloud(wordFreqData) {
+        const canvas = document.getElementById('wordCloudCanvas');
+        const empty  = document.getElementById('wordcloud-empty');
+        if (!canvas) return;
+
+        if (!wordFreqData || wordFreqData.length === 0) {
+            canvas.style.display = 'none';
+            if (empty) empty.style.display = 'block';
+            return;
+        }
+        canvas.style.display = 'block';
+        if (empty) empty.style.display = 'none';
+
+        const container = document.getElementById('wordcloud-container');
+        canvas.width  = container ? container.clientWidth  : 280;
+        canvas.height = container ? container.clientHeight : 256;
+
+        const maxFreq = Math.max(...wordFreqData.map(w => w[1]));
+        const minFreq = Math.min(...wordFreqData.map(w => w[1]));
+        const range   = maxFreq - minFreq || 1;
+        const list = wordFreqData.map(([word, freq]) => [
+            word,
+            Math.round(12 + ((freq - minFreq) / range) * 46)
+        ]);
+
+        const palette = ['#d9e2ff', '#93aeff', '#6380d2', '#c8bef2', '#b0c4ff'];
+        WordCloud(canvas, {
+            list,
+            gridSize: 6,
+            weightFactor: 1,
+            fontFamily: "'Geist', monospace",
+            color: () => palette[Math.floor(Math.random() * palette.length)],
+            backgroundColor: 'transparent',
+            rotateRatio: 0.2,
+            shrinkToFit: true,
+            clearCanvas: true,
+        });
+    }
+
+    // --- Updatable chart helpers ---
+    function updateTimelineChart(tlData) {
+        const chart = _chartInstances.timeline;
+        if (!chart) return;
+        chart.data.labels = tlData.map(d => d.date);
+        chart.data.datasets[0].data = tlData.map(d => d.positive);
+        chart.data.datasets[1].data = tlData.map(d => d.neutral);
+        chart.data.datasets[2].data = tlData.map(d => d.negative);
+        chart.update();
+    }
+
+    function updateDoughnutChart(sum) {
+        const chart = _chartInstances.doughnut;
+        if (!chart) return;
+        chart.data.datasets[0].data = [
+            sum.positive_count || 0,
+            sum.neutral_count  || 0,
+            sum.negative_count || 0
+        ];
+        chart.update();
+    }
 
     function initChartsWithData(apiData) {
         // Hancurkan chart lama kalau ada
         Object.values(_chartInstances).forEach(c => { try { c.destroy(); } catch(e){} });
         _chartInstances = {};
+
+        // Reset filter to "Semua" on each new analysis
+        _setActiveFilterBtn('all');
 
         Chart.defaults.color = '#c5c6cd';
         Chart.defaults.font.family = "'Geist', monospace";
@@ -1458,7 +1542,7 @@
             plugins: { legend: { labels: { color: '#c5c6cd' } } }
         };
 
-        // Timeline Chart — line chart mapped from apiData.timeline
+        // Timeline Chart — full-width line chart
         const tlData   = apiData.timeline || [];
         const tlLabels = tlData.map(d => d.date);
         _chartInstances.timeline = new Chart(document.getElementById('timelineChart'), {
@@ -1495,46 +1579,28 @@
             }
         });
 
-        // Model Performance Chart (reusing canvas #radarChart)
-        _chartInstances.radar = new Chart(document.getElementById('radarChart'), {
-            type: 'bar',
+        // Word Cloud
+        renderWordCloud(apiData.word_freq || []);
+
+        // Doughnut Chart — distribusi sentimen
+        const sum = apiData.summary || { positive_count: 0, neutral_count: 0, negative_count: 0 };
+        _chartInstances.doughnut = new Chart(document.getElementById('doughnutChart'), {
+            type: 'doughnut',
             data: {
-                labels: ['Accuracy', 'Precision', 'Recall', 'F1-Score'],
+                labels: ['Positif', 'Netral', 'Negatif'],
                 datasets: [{
-                    label: 'Model Metrics (%)',
-                    data: [
-                        apiData.model_metrics ? apiData.model_metrics.Accuracy : 100,
-                        apiData.model_metrics ? apiData.model_metrics.Precision : 100,
-                        apiData.model_metrics ? apiData.model_metrics.Recall : 100,
-                        apiData.model_metrics ? apiData.model_metrics.F1_Score : 100
-                    ],
-                    backgroundColor: ['#28a745', '#17a2b8', '#ffc107', '#6f42c1'],
-                    borderRadius: 4
+                    data: [sum.positive_count, sum.neutral_count, sum.negative_count],
+                    backgroundColor: ['#d9e2ff', '#515f78', '#ffb4ab'],
+                    borderWidth: 0, hoverOffset: 4
                 }]
             },
-            options: {
-                ...commonOptions,
-                plugins: {
-                    ...commonOptions.plugins,
-                    legend: { display: false }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        max: 100,
-                        grid: { color: 'rgba(143,144,151,0.1)' }
-                    },
-                    x: {
-                        grid: { display: false }
-                    }
-                }
-            }
+            options: { ...commonOptions, cutout: '70%' }
         });
 
         // Setup button toggles
         const toggleViewBtn = document.getElementById('toggle-view-btn');
         // isPrecomputedView is declared in the outer IIFE scope — do not redeclare here
-        
+
         if(toggleViewBtn) {
             toggleViewBtn.addEventListener('click', () => {
                 if (!isPrecomputedView) {
@@ -1544,11 +1610,11 @@
                         .then(r => r.json())
                         .then(finalData => {
                             document.getElementById('analysis-title').textContent = 'Analysis: Pre-computed Dataset';
-                            document.getElementById('demo-badge').classList.add('hidden'); // precomputed is the 'full' dataset for demo
+                            document.getElementById('demo-badge').classList.add('hidden');
                             document.getElementById('analysis-status').textContent = `Done - Total: ${finalData.distribution.total} data`;
                             toggleViewBtn.innerHTML = '<span class="material-symbols-outlined text-[16px]">live_tv</span> View Live Analysis';
                             isPrecomputedView = true;
-                            
+
                             const mappedData = {
                                 summary: {
                                     total:          finalData.summary?.total          ?? finalData.distribution?.total    ?? 0,
@@ -1557,10 +1623,12 @@
                                     negative_count: finalData.summary?.negative_count ?? finalData.distribution?.negative ?? 0,
                                 },
                                 timeline:       finalData.timeline       || [],
+                                word_freq:      finalData.word_freq      || [],
                                 confidence_avg: finalData.confidence_avg || { positive: 0, neutral: 0, negative: 0 },
                                 model_metrics:  finalData.model_metrics  || {},
                                 results:        finalData.top_items      || [],
                             };
+                            currentAnalysisReqId = null; // precomputed has no req_id for filter
                             initChartsWithData(mappedData);
                         })
                         .catch(e => {
@@ -1575,40 +1643,6 @@
                 }
             });
         }
-
-        // Bar Chart (#barChart) — avg confidence per label
-        const cavg = apiData.confidence_avg || { positive: 0, neutral: 0, negative: 0 };
-        _chartInstances.bar = new Chart(document.getElementById('barChart'), {
-            type: 'bar',
-            data: {
-                labels: ['Positif', 'Netral', 'Negatif'],
-                datasets: [
-                    { label: 'Avg Confidence (%)', data: [cavg.positive, cavg.neutral, cavg.negative], backgroundColor: '#515f78', borderRadius: 4 },
-                    { label: 'Threshold (50%)',    data: [50, 50, 50], backgroundColor: '#2a344e', borderRadius: 4 }
-                ]
-            },
-            options: { ...commonOptions,
-                scales: {
-                    x: { grid: { display: false } },
-                    y: { grid: { color: 'rgba(143,144,151,0.1)' }, max: 100, ticks: { callback: v => v + '%' } }
-                }
-            }
-        });
-
-        // Doughnut Chart (#doughnutChart) — actual record counts per label
-        const sum = apiData.summary || { positive_count: 0, neutral_count: 0, negative_count: 0 };
-        _chartInstances.doughnut = new Chart(document.getElementById('doughnutChart'), {
-            type: 'doughnut',
-            data: {
-                labels: ['Positif', 'Netral', 'Negatif'],
-                datasets: [{
-                    data: [sum.positive_count, sum.neutral_count, sum.negative_count],
-                    backgroundColor: ['#d9e2ff', '#515f78', '#ffb4ab'],
-                    borderWidth: 0, hoverOffset: 4
-                }]
-            },
-            options: { ...commonOptions, cutout: '70%' }
-        });
 
         // Populate Data Table with pagination
         const tbody = document.getElementById('datasetTableBody');

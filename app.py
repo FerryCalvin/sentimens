@@ -608,7 +608,7 @@ def api_results(req_id):
     status_data = get_status(req_id)
     if status_data.get("status") == "COMPLETED" and status_data.get("file_path"):
         import pandas as pd
-        from utils import get_overall_distribution, get_timeline_data, get_top_items
+        from utils import get_overall_distribution, get_timeline_data, get_top_items, filter_df_by_days, get_word_freq_for_df
         from config import MODEL_METRICS
 
         file_path = status_data["file_path"]
@@ -617,6 +617,11 @@ def api_results(req_id):
         except Exception as e:
             logger.error(f"Failed to read CSV {file_path}: {e}")
             return jsonify({"error": "Gagal membaca file hasil."}), 500
+
+        # Parse optional time-range filter
+        days_param = request.args.get('days')
+        days = int(days_param) if days_param and days_param.isdigit() else None
+        df_filtered = filter_df_by_days(df, days) if days is not None else df
 
         # Normalize column names: rename Indonesian to English for compatibility
         col_map = {
@@ -627,11 +632,10 @@ def api_results(req_id):
             "confidence_negatif": "confidence_negative",
             "confidence_netral": "confidence_neutral",
         }
-        df_renamed = df.rename(columns={k: v for k, v in col_map.items() if k in df.columns})
+        df.rename(columns={k: v for k, v in col_map.items() if k in df.columns})
 
-        # For aggregation functions, use original column names (they expect 'sentimen', 'confidence_positif', etc.)
+        # top_items and confidence_avg always from full df (for data table & model overview)
         top_items_raw = get_top_items(df, n=100)
-        # Remap keys in top_items for frontend
         top_items = []
         for item in top_items_raw:
             top_items.append({
@@ -644,12 +648,14 @@ def api_results(req_id):
                 "confidence_neutral": float(item.get("confidence_netral", 0)),
             })
 
-        dist = get_overall_distribution(df)
         confidence_avg = {
             "positive": round(float(df["confidence_positif"].mean()) * 100, 1) if "confidence_positif" in df.columns else 0.0,
             "neutral":  round(float(df["confidence_netral"].mean())  * 100, 1) if "confidence_netral"  in df.columns else 0.0,
             "negative": round(float(df["confidence_negatif"].mean()) * 100, 1) if "confidence_negatif" in df.columns else 0.0,
         }
+
+        # timeline, distribution, and word_freq respect the active date filter
+        dist = get_overall_distribution(df_filtered)
         return jsonify({
             "distribution": dist,
             "summary": {
@@ -658,7 +664,8 @@ def api_results(req_id):
                 "neutral_count":  dist["neutral"],
                 "negative_count": dist["negative"],
             },
-            "timeline":       get_timeline_data(df),
+            "timeline":       get_timeline_data(df_filtered),
+            "word_freq":      get_word_freq_for_df(df_filtered),
             "confidence_avg": confidence_avg,
             "top_items":      top_items,
             "model_metrics":  MODEL_METRICS,

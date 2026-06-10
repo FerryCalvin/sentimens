@@ -96,7 +96,7 @@ def _scrape_via_subprocess(keyword: str, limit: int) -> list:
         return []
 
 
-def _scrape_in_process(keyword: str, limit: int, sources: list) -> list:
+def _scrape_in_process(keyword: str, limit: int, sources: list, req_id: str = None) -> list:
     """
     Scrape menggunakan subprocess worker terpisah per source.
     """
@@ -111,12 +111,16 @@ def _scrape_in_process(keyword: str, limit: int, sources: list) -> list:
             item["source"] = "twitter"
         results.extend(social)
         logger.info(f"[Pipeline] Social: {len(social)} hasil")
+        if req_id:
+            _update_status(req_id, SCRAPING, f"Data sosial selesai ({len(social)} item), mengambil berita...", 25)
 
     if "web" in sources or "news" in sources:
         logger.info(f"[Pipeline] Web search via subprocess: {keyword}")
         web = _scrape_via_subprocess(keyword, limit_per_source)
         results.extend(web)
         logger.info(f"[Pipeline] Web: {len(web)} hasil")
+        if req_id:
+            _update_status(req_id, SCRAPING, f"Data web selesai ({len(web)} item), menyusun data...", 40)
 
     # Deduplicate
     seen = set()
@@ -160,7 +164,7 @@ def start_scrape_pipeline(keyword: str, limit: int, sources: list[str], mode: st
                     logger.info(f"[Pipeline] Scraper eksternal: {len(data)} hasil")
             except Exception as ext_err:
                 logger.warning(f"[Pipeline] Scraper eksternal tidak tersedia ({ext_err}), pakai in-process scraping")
-                data = _scrape_in_process(keyword, limit, sources)
+                data = _scrape_in_process(keyword, limit, sources, req_id=req_id)
 
             # ── FIX #3: Graceful handling jika 0 hasil ────────────────────
             # Jangan crash — buat file CSV kosong agar Dashboard tidak error.

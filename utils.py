@@ -401,6 +401,30 @@ def get_overall_distribution(df: pd.DataFrame) -> dict:
     return build_distribution(df)
 
 
+def filter_df_by_days(df: pd.DataFrame, days: int) -> pd.DataFrame:
+    """Return rows from the last `days` days based on the `date` column."""
+    if 'date' not in df.columns or df.empty:
+        return df
+    df = df.copy()
+    if not pd.api.types.is_datetime64_any_dtype(df['date']):
+        df['date'] = pd.to_datetime(df['date'], errors='coerce')
+    df = df.dropna(subset=['date'])
+    if df['date'].dt.tz is not None:
+        df['date'] = df['date'].dt.tz_localize(None)
+    cutoff = pd.Timestamp.now() - pd.Timedelta(days=days)
+    return df[df['date'] >= cutoff]
+
+
+def get_word_freq_for_df(df: pd.DataFrame) -> list:
+    """Return [[word, count], ...] top-50 from teks_bersih column."""
+    from preprocessing import get_word_frequencies
+    if df.empty or 'teks_bersih' not in df.columns:
+        return []
+    texts = df['teks_bersih'].dropna().tolist()
+    freq_dict = get_word_frequencies(texts)
+    return [[word, count] for word, count in list(freq_dict.items())[:50]]
+
+
 def get_timeline_data(df: pd.DataFrame) -> list:
     """
     Konversi timeline dict ke format list yang dipakai frontend SPA.
