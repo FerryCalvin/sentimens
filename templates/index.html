@@ -479,11 +479,37 @@
                 Batch Analysis
             </h2>
 <p class="text-on-surface-variant">Upload CSV datasets for bulk processing and historical trend analysis.</p>
-<div class="w-full flex flex-col items-center justify-center border-2 border-dashed border-on-surface/20 rounded-lg p-12 bg-surface-bright/5 ui-element hover:bg-surface-bright/10 transition-colors cursor-pointer">
+<div id="csv-drop-zone" class="w-full flex flex-col items-center justify-center border-2 border-dashed border-on-surface/20 rounded-lg p-12 bg-surface-bright/5 ui-element hover:bg-surface-bright/10 transition-colors cursor-pointer">
+<input id="csv-file-input" type="file" accept=".csv" class="hidden">
 <span class="material-symbols-outlined text-4xl text-on-surface-variant mb-4">upload_file</span>
-<p class="font-label-caps text-label-caps uppercase text-on-surface-variant">Drag and drop CSV files here</p>
+<p id="csv-drop-label" class="font-label-caps text-label-caps uppercase text-on-surface-variant">Drag and drop CSV files here</p>
 <p class="text-sm text-on-surface/50 mt-2">or click to browse</p>
 </div>
+<!-- Result panel (hidden until CSV is processed) -->
+<div id="batch-result-panel" class="hidden w-full flex flex-col gap-6 mt-4">
+    <div id="batch-summary" class="flex flex-wrap gap-4 justify-center"></div>
+    <div class="w-full overflow-x-auto rounded-lg border border-outline-variant/20">
+        <table class="w-full text-sm text-left">
+            <thead class="bg-surface-dim text-on-surface-variant uppercase text-xs font-semibold">
+                <tr>
+                    <th class="p-3 whitespace-nowrap">Teks</th>
+                    <th class="p-3 whitespace-nowrap">Sentimen</th>
+                    <th class="p-3 whitespace-nowrap">Conf (Pos/Neg/Neu)</th>
+                </tr>
+            </thead>
+            <tbody id="batch-table-body" class="divide-y divide-outline-variant/10 text-on-surface-variant"></tbody>
+        </table>
+    </div>
+    <div class="flex gap-4 justify-center flex-wrap">
+        <button id="batch-download-btn" class="flex items-center gap-2 px-6 py-2 rounded-lg bg-primary text-on-primary font-semibold text-sm hover:opacity-90 transition-opacity">
+            <span class="material-symbols-outlined text-[16px]">download</span> Download CSV
+        </button>
+        <button id="batch-reset-btn" class="flex items-center gap-2 px-6 py-2 rounded-lg border border-outline-variant text-on-surface-variant text-sm hover:bg-on-surface/5 transition-colors">
+            <span class="material-symbols-outlined text-[16px]">refresh</span> Upload Baru
+        </button>
+    </div>
+</div>
+<p id="batch-status" class="text-sm text-on-surface-variant mt-2 hidden"></p>
 </div>
 </main>
 
@@ -1264,7 +1290,7 @@
                         const mod3 = document.getElementById('module-vector');
                         if (mod1) mod1.className = (state === 'SCRAPING') ? 'module-item opacity-100' : 'module-item opacity-40';
                         if (mod2) mod2.className = (state === 'PROCESSING') ? 'module-item opacity-100' : 'module-item opacity-40';
-                        if (mod3) mod3.className = (state === 'MAPPING' || statusData.progress > 80 || state === 'COMPLETED') ? 'module-item opacity-100' : 'module-item opacity-40';
+                        if (mod3) mod3.className = (state === 'FINALIZING' || state === 'COMPLETED') ? 'module-item opacity-100' : 'module-item opacity-40';
 
                         if (statusData.status === 'COMPLETED') {
                             if (statusData.total_results === 0) {
@@ -1563,6 +1589,116 @@
     const style = document.createElement('style');
     style.textContent = '@keyframes spin { to { transform: rotate(360deg); } }';
     document.head.appendChild(style);
+
+    // --- Batch CSV Drag & Drop ---
+    (function() {
+        const dropZone    = document.getElementById('csv-drop-zone');
+        const fileInput   = document.getElementById('csv-file-input');
+        const resultPanel = document.getElementById('batch-result-panel');
+        const statusEl    = document.getElementById('batch-status');
+        let   _csvContent = '';
+
+        if (!dropZone || !fileInput) return;
+
+        dropZone.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', e => {
+            if (e.target.files[0]) handleCsvFile(e.target.files[0]);
+            fileInput.value = '';
+        });
+
+        dropZone.addEventListener('dragover',  e => { e.preventDefault(); dropZone.style.borderColor = 'var(--color-primary, #d9e2ff)'; });
+        dropZone.addEventListener('dragenter', e => { e.preventDefault(); dropZone.style.borderColor = 'var(--color-primary, #d9e2ff)'; });
+        dropZone.addEventListener('dragleave', ()  => { dropZone.style.borderColor = ''; });
+        dropZone.addEventListener('drop', e => {
+            e.preventDefault();
+            dropZone.style.borderColor = '';
+            const file = e.dataTransfer.files[0];
+            if (file) handleCsvFile(file);
+        });
+
+        async function handleCsvFile(file) {
+            if (!file.name.toLowerCase().endsWith('.csv')) {
+                alert('Hanya file .csv yang diterima.');
+                return;
+            }
+            setStatus('Memproses…');
+            resultPanel.classList.add('hidden');
+            const label = document.getElementById('csv-drop-label');
+            if (label) label.textContent = `Memproses: ${file.name}…`;
+
+            const fd = new FormData();
+            fd.append('csv_file', file);
+
+            try {
+                const res  = await fetch('/api/batch', { method: 'POST', body: fd });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Gagal memproses CSV');
+                _csvContent = data.csv_content || '';
+                renderBatchResults(data);
+                setStatus(`Selesai — ${data.total_results} baris diproses.`);
+                if (label) label.textContent = file.name;
+            } catch (err) {
+                setStatus('Error: ' + err.message);
+                alert('Error: ' + err.message);
+                if (label) label.textContent = 'Drag and drop CSV files here';
+            }
+        }
+
+        function renderBatchResults(data) {
+            const summaryEl = document.getElementById('batch-summary');
+            const s = data.summary || {};
+            summaryEl.innerHTML = [
+                { label: 'Total',   val: data.total_results || 0, color: '#c5c6cd' },
+                { label: 'Positif', val: s.positive_count   || 0, color: '#d9e2ff' },
+                { label: 'Netral',  val: s.neutral_count    || 0, color: '#515f78' },
+                { label: 'Negatif', val: s.negative_count   || 0, color: '#ffb4ab' },
+            ].map(({ label, val, color }) =>
+                `<div class="px-4 py-2 rounded-lg border border-outline-variant/20 text-center min-w-[90px]">
+                   <div class="text-lg font-semibold" style="color:${color}">${val}</div>
+                   <div class="text-xs text-on-surface-variant uppercase tracking-wide">${label}</div>
+                 </div>`
+            ).join('');
+
+            const tbody = document.getElementById('batch-table-body');
+            tbody.innerHTML = '';
+            (data.results || []).forEach(row => {
+                const lbl   = (row.predicted_label || '').toLowerCase();
+                const color = lbl.includes('positif') ? '#d9e2ff' : lbl.includes('negatif') ? '#ffb4ab' : '#515f78';
+                const tr    = document.createElement('tr');
+                tr.className = 'hover:bg-on-surface/5 transition-colors';
+                tr.innerHTML = `
+                    <td class="p-3 text-sm leading-relaxed max-w-[400px] truncate">${row.raw_text || '-'}</td>
+                    <td class="p-3 whitespace-nowrap font-semibold" style="color:${color}">${row.predicted_label || '-'}</td>
+                    <td class="p-3 whitespace-nowrap text-xs font-mono-code">${(row.confidence_positive||0).toFixed(2)} / ${(row.confidence_negative||0).toFixed(2)} / ${(row.confidence_neutral||0).toFixed(2)}</td>`;
+                tbody.appendChild(tr);
+            });
+
+            resultPanel.classList.remove('hidden');
+        }
+
+        document.getElementById('batch-download-btn')?.addEventListener('click', () => {
+            if (!_csvContent) return;
+            const blob = new Blob([_csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url  = URL.createObjectURL(blob);
+            const a    = Object.assign(document.createElement('a'), { href: url, download: 'hasil_analisis_batch.csv' });
+            a.click();
+            URL.revokeObjectURL(url);
+        });
+
+        document.getElementById('batch-reset-btn')?.addEventListener('click', () => {
+            resultPanel.classList.add('hidden');
+            setStatus('');
+            _csvContent = '';
+            const label = document.getElementById('csv-drop-label');
+            if (label) label.textContent = 'Drag and drop CSV files here';
+        });
+
+        function setStatus(msg) {
+            if (!statusEl) return;
+            statusEl.textContent = msg;
+            statusEl.classList.toggle('hidden', !msg);
+        }
+    })();
 
 })();
 </script>

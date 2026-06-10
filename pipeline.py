@@ -21,6 +21,7 @@ _status_lock = threading.Lock()
 PENDING = "PENDING"
 SCRAPING = "SCRAPING"
 INFERENCING = "INFERENCING"
+FINALIZING = "FINALIZING"
 COMPLETED = "COMPLETED"
 FAILED = "FAILED"
 
@@ -204,6 +205,8 @@ def start_scrape_pipeline(keyword: str, limit: int, sources: list[str], mode: st
                 _update_status(req_id, FAILED, f"Inferensi gagal: {str(e)}", 0)
                 return
 
+            _update_status(req_id, FINALIZING, "Menyusun hasil...", 95)
+
             results = []
             for raw, clean, date, src, pred in zip(raw_texts, clean_texts, dates, sources_list, predictions):
                 results.append({
@@ -218,10 +221,14 @@ def start_scrape_pipeline(keyword: str, limit: int, sources: list[str], mode: st
                     "inference_time_ms":   pred.get("inference_time_ms",   0.0),
                 })
 
+            _update_status(req_id, FINALIZING, "Menyimpan data...", 97)
+
             csv_content = generate_csv_output(results)
             file_path = DATA_DIR / f"{req_id}.csv"
             with open(file_path, "w", encoding="utf-8-sig", newline="") as f:
                 f.write(csv_content)
+
+            _update_status(req_id, FINALIZING, "Menghitung ringkasan...", 99)
 
             summary = calculate_summary(results)
 

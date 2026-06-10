@@ -73,13 +73,13 @@ def expand_query(original_keyword: str) -> str:
 
     try:
         with ThreadPoolExecutor(max_workers=1) as ex:
-            expanded = ex.submit(_call).result(timeout=3)
+            expanded = ex.submit(_call).result(timeout=10)
         if expanded:
             print(f"[QueryExpander] '{original_keyword}' → '{expanded}'")
             return expanded
         return original_keyword
     except FutureTimeout:
-        print("[QueryExpander] Timeout (3s) — using original keyword.")
+        print("[QueryExpander] Timeout (10s) — using original keyword.")
         return original_keyword
     except Exception as e:
         print(f"[QueryExpander] Fallback to original keyword ({type(e).__name__}: {e})")

@@ -212,6 +212,29 @@ async def _scrape_with_cookies(keyword: str, limit: int, raw_cookies: dict, days
 
             # ── Scroll & kumpulkan tweet ──────────────────────────────────
             results = await _collect_tweets(page, search_url, limit)
+
+            # Jika Top tab habis sebelum limit, coba Latest tab (&f=live)
+            if len(results) < limit:
+                remaining = limit - len(results)
+                latest_url = search_url.replace("f=top", "f=live")
+                logger.info(
+                    f"Top tab exhausted ({len(results)}/{limit}) — "
+                    f"switching to Latest tab for {remaining} more..."
+                )
+                await page.goto(latest_url, wait_until="domcontentloaded", timeout=DEFAULT_TIMEOUT)
+                await asyncio.sleep(3)
+                more = await _collect_tweets(page, latest_url, remaining)
+                existing_keys = {r["raw_text"][:80] for r in results}
+                added = 0
+                for r in more:
+                    key = r["raw_text"][:80]
+                    if key not in existing_keys:
+                        existing_keys.add(key)
+                        results.append(r)
+                        added += 1
+                if added:
+                    logger.info(f"Latest tab added {added} tweets. Total: {len(results)}")
+
             await context.close()
 
         except Exception as e:
@@ -268,6 +291,29 @@ async def _scrape_with_session(keyword: str, limit: int, days_back: int = 7) -> 
                 return []
 
             results = await _collect_tweets(page, search_url, limit)
+
+            # Jika Top tab habis sebelum limit, coba Latest tab (&f=live)
+            if len(results) < limit:
+                remaining = limit - len(results)
+                latest_url = search_url.replace("f=top", "f=live")
+                logger.info(
+                    f"Top tab exhausted ({len(results)}/{limit}) — "
+                    f"switching to Latest tab for {remaining} more..."
+                )
+                await page.goto(latest_url, wait_until="domcontentloaded", timeout=DEFAULT_TIMEOUT)
+                await asyncio.sleep(3)
+                more = await _collect_tweets(page, latest_url, remaining)
+                existing_keys = {r["raw_text"][:80] for r in results}
+                added = 0
+                for r in more:
+                    key = r["raw_text"][:80]
+                    if key not in existing_keys:
+                        existing_keys.add(key)
+                        results.append(r)
+                        added += 1
+                if added:
+                    logger.info(f"Latest tab added {added} tweets. Total: {len(results)}")
+
             await context.close()
         except Exception as e:
             logger.error(f"Error session lama: {e}")
