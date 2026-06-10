@@ -452,7 +452,7 @@
 </div>
 
 <!-- Data Table View -->
-<div class="chart-container col-span-1 md:col-span-2 lg:col-span-3">
+<div class="chart-container col-span-1 md:col-span-2 lg:col-span-3" style="background: rgba(7, 18, 42, 0.92);">
     <h3 class="font-label-caps text-label-caps text-on-surface-variant mb-4 uppercase">Scraped Dataset Preview</h3>
     <div class="overflow-x-auto max-h-96 custom-scrollbar">
         <table class="w-full text-left font-body-base text-sm border-collapse" id="datasetTable">
@@ -470,6 +470,15 @@
             </tbody>
         </table>
     </div>
+    <div class="flex items-center justify-between mt-3 px-1 ui-element" id="analysis-pagination" style="display:none!important;">
+        <button id="analysis-prev-btn" class="flex items-center gap-1 px-3 py-1.5 rounded border border-outline-variant/40 text-on-surface-variant text-sm hover:bg-on-surface/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+            <span class="material-symbols-outlined text-[16px]">arrow_back</span> Prev
+        </button>
+        <span id="analysis-page-label" class="text-xs text-on-surface-variant font-mono-code">Halaman 1 dari 1</span>
+        <button id="analysis-next-btn" class="flex items-center gap-1 px-3 py-1.5 rounded border border-outline-variant/40 text-on-surface-variant text-sm hover:bg-on-surface/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+            Next <span class="material-symbols-outlined text-[16px]">arrow_forward</span>
+        </button>
+    </div>
 </div>
 </div>
 </div>
@@ -485,14 +494,29 @@
 <p id="csv-drop-label" class="font-label-caps text-label-caps uppercase text-on-surface-variant">Drag and drop CSV files here</p>
 <p class="text-sm text-on-surface/50 mt-2">or click to browse</p>
 </div>
-<!-- Result panel (hidden until CSV is processed) -->
-<div id="batch-result-panel" class="hidden w-full flex flex-col gap-6 mt-4">
-    <div id="batch-summary" class="flex flex-wrap gap-4 justify-center"></div>
-    <div class="w-full overflow-x-auto rounded-lg border border-outline-variant/20">
+</div>
+<!-- Batch Result View -->
+<div class="analysis-view flex-col w-full max-w-container-max mx-auto gap-6 mt-8 ui-element" id="batch-result-view">
+    <div class="flex flex-col md:flex-row justify-between items-start md:items-end mb-4 border-b border-on-surface/10 pb-4">
+        <div>
+            <h2 class="font-display-sm text-display-sm text-on-surface">Hasil Analisis Batch</h2>
+            <p id="batch-result-status" class="text-on-surface-variant text-sm mt-1">—</p>
+        </div>
+        <div class="flex gap-3 mt-4 md:mt-0 flex-wrap">
+            <button id="batch-download-btn" class="flex items-center gap-2 px-5 py-2 rounded-lg bg-primary text-on-primary font-semibold text-sm hover:opacity-90 transition-opacity">
+                <span class="material-symbols-outlined text-[16px]">download</span> Download CSV
+            </button>
+            <button id="batch-reset-btn" class="flex items-center gap-2 px-5 py-2 rounded-lg border border-outline-variant text-on-surface-variant text-sm hover:bg-on-surface/5 transition-colors">
+                <span class="material-symbols-outlined text-[16px]">arrow_back</span> Upload Baru
+            </button>
+        </div>
+    </div>
+    <div id="batch-summary" class="flex flex-wrap gap-4"></div>
+    <div class="w-full overflow-x-auto rounded-lg border border-outline-variant/20" style="background: rgba(7, 18, 42, 0.92);">
         <table class="w-full text-sm text-left">
             <thead class="bg-surface-dim text-on-surface-variant uppercase text-xs font-semibold">
                 <tr>
-                    <th class="p-3 whitespace-nowrap">Teks</th>
+                    <th class="p-3 whitespace-nowrap">Teks Asli</th>
                     <th class="p-3 whitespace-nowrap">Sentimen</th>
                     <th class="p-3 whitespace-nowrap">Conf (Pos/Neg/Neu)</th>
                 </tr>
@@ -500,16 +524,15 @@
             <tbody id="batch-table-body" class="divide-y divide-outline-variant/10 text-on-surface-variant"></tbody>
         </table>
     </div>
-    <div class="flex gap-4 justify-center flex-wrap">
-        <button id="batch-download-btn" class="flex items-center gap-2 px-6 py-2 rounded-lg bg-primary text-on-primary font-semibold text-sm hover:opacity-90 transition-opacity">
-            <span class="material-symbols-outlined text-[16px]">download</span> Download CSV
+    <div class="flex items-center justify-between mt-3 px-1 ui-element" id="batch-pagination" style="display:none!important;">
+        <button id="batch-prev-btn" class="flex items-center gap-1 px-3 py-1.5 rounded border border-outline-variant/40 text-on-surface-variant text-sm hover:bg-on-surface/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+            <span class="material-symbols-outlined text-[16px]">arrow_back</span> Prev
         </button>
-        <button id="batch-reset-btn" class="flex items-center gap-2 px-6 py-2 rounded-lg border border-outline-variant text-on-surface-variant text-sm hover:bg-on-surface/5 transition-colors">
-            <span class="material-symbols-outlined text-[16px]">refresh</span> Upload Baru
+        <span id="batch-page-label" class="text-xs text-on-surface-variant font-mono-code">Halaman 1 dari 1</span>
+        <button id="batch-next-btn" class="flex items-center gap-1 px-3 py-1.5 rounded border border-outline-variant/40 text-on-surface-variant text-sm hover:bg-on-surface/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+            Next <span class="material-symbols-outlined text-[16px]">arrow_forward</span>
         </button>
     </div>
-</div>
-<p id="batch-status" class="text-sm text-on-surface-variant mt-2 hidden"></p>
 </div>
 </main>
 
@@ -634,6 +657,7 @@
         const landingView = document.getElementById('landing-view');
         const analysisView = document.getElementById('analysis-view');
         const batchView = document.getElementById('batch-view');
+        const batchResultView = document.getElementById('batch-result-view');
         const analyzeBtn = document.getElementById('analyze-btn');
         const topicInput = document.getElementById('topic-input');
         const newAnalysisBtn = document.getElementById('new-analysis-btn');
@@ -646,6 +670,7 @@
             landingView.classList.add('hidden-view');
             analysisView.classList.remove('active');
             batchView.classList.remove('active');
+            batchResultView.classList.remove('active');
             const loadView = document.getElementById('loading-view');
             if(loadView) loadView.classList.add('hidden-view');
 
@@ -659,6 +684,12 @@
                 analysisView.classList.add('active');
             } else if (viewId === 'batch') {
                 batchView.classList.add('active');
+                navBatch.classList.add('text-primary', 'border-b-2', 'border-primary');
+                navBatch.classList.remove('text-on-surface-variant');
+                navStart.classList.remove('text-primary', 'border-b-2', 'border-primary');
+                navStart.classList.add('text-on-surface-variant');
+            } else if (viewId === 'batch-results') {
+                batchResultView.classList.add('active');
                 navBatch.classList.add('text-primary', 'border-b-2', 'border-primary');
                 navBatch.classList.remove('text-on-surface-variant');
                 navStart.classList.remove('text-primary', 'border-b-2', 'border-primary');
@@ -1256,6 +1287,23 @@
 
                 const pollStart = Date.now();
                 let fetchFailCount = 0;
+                let _displayedProgress = 0;
+                let _smoothTimer = null;
+
+                function startSmoothProgress(serverProgress, status) {
+                    if (_smoothTimer) clearInterval(_smoothTimer);
+                    const targets = { SCRAPING: 45, INFERENCING: 90, FINALIZING: 98 };
+                    const target = targets[status] || serverProgress;
+                    _smoothTimer = setInterval(() => {
+                        const lCounterVal = document.getElementById('loading-counter-val');
+                        if (_displayedProgress < target && _displayedProgress < serverProgress + 8) {
+                            _displayedProgress = Math.min(_displayedProgress + 0.4, target);
+                            if (lCounterVal) lCounterVal.textContent = Math.round(_displayedProgress);
+                        } else {
+                            clearInterval(_smoothTimer);
+                        }
+                    }, 150);
+                }
 
                 const doPoll = async () => {
                     if (Date.now() - pollStart > MAX_ELAPSED_MS) {
@@ -1281,7 +1329,10 @@
                         const lStatusTxt = document.getElementById('loading-status-text');
                         const lCounterVal = document.getElementById('loading-counter-val');
                         if (lStatusTxt) lStatusTxt.textContent = (statusData.message || statusData.status || 'PROCESSING').toUpperCase();
-                        if (lCounterVal) lCounterVal.textContent = Math.round(statusData.progress || 0);
+                        const serverProg = Math.round(statusData.progress || 0);
+                        if (serverProg > _displayedProgress) _displayedProgress = serverProg;
+                        if (lCounterVal) lCounterVal.textContent = Math.round(_displayedProgress);
+                        startSmoothProgress(serverProg, statusData.status || '');
 
                         // Module highlighting
                         const state = statusData.status || '';
@@ -1293,6 +1344,8 @@
                         if (mod3) mod3.className = (state === 'FINALIZING' || state === 'COMPLETED') ? 'module-item opacity-100' : 'module-item opacity-40';
 
                         if (statusData.status === 'COMPLETED') {
+                            if (_smoothTimer) clearInterval(_smoothTimer);
+                            if (lCounterVal) lCounterVal.textContent = '100';
                             if (statusData.total_results === 0) {
                                 if (_analysisTitle)  _analysisTitle.textContent  = `Analysis: ${text}`;
                                 if (_analysisStatus) _analysisStatus.textContent = 'No data found for the given keyword.';
@@ -1344,6 +1397,7 @@
                         }
 
                         if (statusData.status === 'FAILED' || statusData.status === 'NOT_FOUND') {
+                            if (_smoothTimer) clearInterval(_smoothTimer);
                             if (_analysisStatus) _analysisStatus.textContent = 'Error: ' + (statusData.message || 'Proses gagal');
                             newBtn.innerHTML = origHTML;
                             newBtn.disabled  = false;
@@ -1556,30 +1610,51 @@
             options: { ...commonOptions, cutout: '70%' }
         });
 
-        // Populate Data Table
+        // Populate Data Table with pagination
         const tbody = document.getElementById('datasetTableBody');
         if (tbody) {
-            tbody.innerHTML = '';
-            const results = apiData.results || [];
-            results.forEach(row => {
-                const tr = document.createElement('tr');
-                tr.className = 'hover:bg-on-surface/5 transition-colors';
-                
-                let labelColor = '#c5c6cd';
-                let lbl = row.predicted_label ? row.predicted_label.toLowerCase() : '';
-                if (lbl.includes('positif')) labelColor = '#d9e2ff';
-                else if (lbl.includes('negatif')) labelColor = '#ffb4ab';
-                else labelColor = '#515f78';
-                
-                tr.innerHTML = `
-                    <td class="p-3 whitespace-nowrap text-xs text-on-surface/60">${row.date || '-'}</td>
-                    <td class="p-3 whitespace-nowrap text-xs font-mono-code">${row.source || '-'}</td>
-                    <td class="p-3 text-sm leading-relaxed">${row.raw_text || row.text || '-'}</td>
-                    <td class="p-3 whitespace-nowrap font-semibold" style="color: ${labelColor}">${row.predicted_label || '-'}</td>
-                    <td class="p-3 whitespace-nowrap text-xs font-mono-code">${(row.confidence_positive || 0).toFixed(2)} / ${(row.confidence_negative || 0).toFixed(2)} / ${(row.confidence_neutral || 0).toFixed(2)}</td>
-                `;
-                tbody.appendChild(tr);
-            });
+            const ANALYSIS_PAGE_SIZE = 20;
+            let _analysisRows = apiData.results || [];
+            let _analysisPage = 0;
+
+            function renderAnalysisPage() {
+                tbody.innerHTML = '';
+                const start = _analysisPage * ANALYSIS_PAGE_SIZE;
+                const pageRows = _analysisRows.slice(start, start + ANALYSIS_PAGE_SIZE);
+                pageRows.forEach(row => {
+                    const tr = document.createElement('tr');
+                    tr.className = 'hover:bg-on-surface/5 transition-colors';
+                    let labelColor = '#515f78';
+                    const lbl = (row.predicted_label || '').toLowerCase();
+                    if (lbl.includes('positif')) labelColor = '#d9e2ff';
+                    else if (lbl.includes('negatif')) labelColor = '#ffb4ab';
+                    tr.innerHTML = `
+                        <td class="p-3 whitespace-nowrap text-xs text-on-surface/60">${row.date || '-'}</td>
+                        <td class="p-3 whitespace-nowrap text-xs font-mono-code">${row.source || '-'}</td>
+                        <td class="p-3 text-sm leading-relaxed">${row.raw_text || row.text || '-'}</td>
+                        <td class="p-3 whitespace-nowrap font-semibold" style="color: ${labelColor}">${row.predicted_label || '-'}</td>
+                        <td class="p-3 whitespace-nowrap text-xs font-mono-code">${(row.confidence_positive || 0).toFixed(2)} / ${(row.confidence_negative || 0).toFixed(2)} / ${(row.confidence_neutral || 0).toFixed(2)}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+
+                const totalPages = Math.max(1, Math.ceil(_analysisRows.length / ANALYSIS_PAGE_SIZE));
+                const pgEl = document.getElementById('analysis-pagination');
+                const lblEl = document.getElementById('analysis-page-label');
+                const prevBtn = document.getElementById('analysis-prev-btn');
+                const nextBtn = document.getElementById('analysis-next-btn');
+                if (pgEl) pgEl.style.cssText = _analysisRows.length > ANALYSIS_PAGE_SIZE ? 'display:flex!important;' : 'display:none!important;';
+                if (lblEl) lblEl.textContent = `Halaman ${_analysisPage + 1} dari ${totalPages}`;
+                if (prevBtn) prevBtn.disabled = _analysisPage === 0;
+                if (nextBtn) nextBtn.disabled = _analysisPage >= totalPages - 1;
+            }
+
+            renderAnalysisPage();
+
+            const prevBtn = document.getElementById('analysis-prev-btn');
+            const nextBtn = document.getElementById('analysis-next-btn');
+            if (prevBtn) prevBtn.onclick = () => { if (_analysisPage > 0) { _analysisPage--; renderAnalysisPage(); } };
+            if (nextBtn) nextBtn.onclick = () => { const tp = Math.ceil(_analysisRows.length / ANALYSIS_PAGE_SIZE); if (_analysisPage < tp - 1) { _analysisPage++; renderAnalysisPage(); } };
         }
 
         _chartsCreated = true;
@@ -1592,11 +1667,9 @@
 
     // --- Batch CSV Drag & Drop ---
     (function() {
-        const dropZone    = document.getElementById('csv-drop-zone');
-        const fileInput   = document.getElementById('csv-file-input');
-        const resultPanel = document.getElementById('batch-result-panel');
-        const statusEl    = document.getElementById('batch-status');
-        let   _csvContent = '';
+        const dropZone  = document.getElementById('csv-drop-zone');
+        const fileInput = document.getElementById('csv-file-input');
+        let _csvContent = '';
 
         if (!dropZone || !fileInput) return;
 
@@ -1605,9 +1678,8 @@
             if (e.target.files[0]) handleCsvFile(e.target.files[0]);
             fileInput.value = '';
         });
-
-        dropZone.addEventListener('dragover',  e => { e.preventDefault(); dropZone.style.borderColor = 'var(--color-primary, #d9e2ff)'; });
-        dropZone.addEventListener('dragenter', e => { e.preventDefault(); dropZone.style.borderColor = 'var(--color-primary, #d9e2ff)'; });
+        dropZone.addEventListener('dragover',  e => { e.preventDefault(); dropZone.style.borderColor = '#d9e2ff'; });
+        dropZone.addEventListener('dragenter', e => { e.preventDefault(); dropZone.style.borderColor = '#d9e2ff'; });
         dropZone.addEventListener('dragleave', ()  => { dropZone.style.borderColor = ''; });
         dropZone.addEventListener('drop', e => {
             e.preventDefault();
@@ -1621,10 +1693,24 @@
                 alert('Hanya file .csv yang diterima.');
                 return;
             }
-            setStatus('Memproses…');
-            resultPanel.classList.add('hidden');
-            const label = document.getElementById('csv-drop-label');
-            if (label) label.textContent = `Memproses: ${file.name}…`;
+
+            const lStatus  = document.getElementById('loading-status-text');
+            const lCounter = document.getElementById('loading-counter-val');
+            if (lStatus)  lStatus.textContent  = 'MEMPROSES CSV';
+            if (lCounter) lCounter.textContent = '0';
+            showView('loading');
+
+            // Simulate smooth progress while waiting for synchronous API
+            let fakeProgress = 0;
+            const fakeTimer = setInterval(() => {
+                fakeProgress = Math.min(fakeProgress + 1.2, 85);
+                if (lCounter) lCounter.textContent = Math.round(fakeProgress);
+                if (lStatus) {
+                    if (fakeProgress < 30) lStatus.textContent = 'MEMBACA CSV';
+                    else if (fakeProgress < 60) lStatus.textContent = 'MENGANALISIS SENTIMEN';
+                    else lStatus.textContent = 'MENYUSUN HASIL';
+                }
+            }, 300);
 
             const fd = new FormData();
             fd.append('csv_file', file);
@@ -1632,26 +1718,31 @@
             try {
                 const res  = await fetch('/api/batch', { method: 'POST', body: fd });
                 const data = await res.json();
+                clearInterval(fakeTimer);
+                if (lCounter) lCounter.textContent = '100';
+                if (lStatus)  lStatus.textContent  = 'SELESAI';
                 if (!res.ok) throw new Error(data.error || 'Gagal memproses CSV');
                 _csvContent = data.csv_content || '';
-                renderBatchResults(data);
-                setStatus(`Selesai — ${data.total_results} baris diproses.`);
-                if (label) label.textContent = file.name;
+                renderBatchResults(data, file.name);
+                showView('batch-results');
             } catch (err) {
-                setStatus('Error: ' + err.message);
+                clearInterval(fakeTimer);
                 alert('Error: ' + err.message);
-                if (label) label.textContent = 'Drag and drop CSV files here';
+                showView('batch');
             }
         }
 
-        function renderBatchResults(data) {
+        function renderBatchResults(data, filename) {
+            const statusEl = document.getElementById('batch-result-status');
+            if (statusEl) statusEl.textContent = `${filename} — ${data.total_results} baris diproses`;
+
             const summaryEl = document.getElementById('batch-summary');
             const s = data.summary || {};
             summaryEl.innerHTML = [
                 { label: 'Total',   val: data.total_results || 0, color: '#c5c6cd' },
-                { label: 'Positif', val: s.positive_count   || 0, color: '#d9e2ff' },
-                { label: 'Netral',  val: s.neutral_count    || 0, color: '#515f78' },
-                { label: 'Negatif', val: s.negative_count   || 0, color: '#ffb4ab' },
+                { label: 'Positif', val: s.positif           || 0, color: '#d9e2ff' },
+                { label: 'Netral',  val: s.netral             || 0, color: '#515f78' },
+                { label: 'Negatif', val: s.negatif            || 0, color: '#ffb4ab' },
             ].map(({ label, val, color }) =>
                 `<div class="px-4 py-2 rounded-lg border border-outline-variant/20 text-center min-w-[90px]">
                    <div class="text-lg font-semibold" style="color:${color}">${val}</div>
@@ -1660,44 +1751,63 @@
             ).join('');
 
             const tbody = document.getElementById('batch-table-body');
-            tbody.innerHTML = '';
-            (data.results || []).forEach(row => {
-                const lbl   = (row.predicted_label || '').toLowerCase();
-                const color = lbl.includes('positif') ? '#d9e2ff' : lbl.includes('negatif') ? '#ffb4ab' : '#515f78';
-                const tr    = document.createElement('tr');
-                tr.className = 'hover:bg-on-surface/5 transition-colors';
-                tr.innerHTML = `
-                    <td class="p-3 text-sm leading-relaxed max-w-[400px] truncate">${row.raw_text || '-'}</td>
-                    <td class="p-3 whitespace-nowrap font-semibold" style="color:${color}">${row.predicted_label || '-'}</td>
-                    <td class="p-3 whitespace-nowrap text-xs font-mono-code">${(row.confidence_positive||0).toFixed(2)} / ${(row.confidence_negative||0).toFixed(2)} / ${(row.confidence_neutral||0).toFixed(2)}</td>`;
-                tbody.appendChild(tr);
-            });
+            const BATCH_PAGE_SIZE = 20;
+            let _batchRows = data.results || [];
+            let _batchPage = 0;
 
-            resultPanel.classList.remove('hidden');
+            function renderBatchPage() {
+                tbody.innerHTML = '';
+                const start = _batchPage * BATCH_PAGE_SIZE;
+                _batchRows.slice(start, start + BATCH_PAGE_SIZE).forEach(row => {
+                    const lbl   = (row.predicted_label || '').toLowerCase();
+                    const color = lbl.includes('positif') ? '#d9e2ff' : lbl.includes('negatif') ? '#ffb4ab' : '#515f78';
+                    const tr    = document.createElement('tr');
+                    tr.className = 'hover:bg-on-surface/5 transition-colors';
+                    tr.innerHTML = `
+                        <td class="p-3 text-sm leading-relaxed max-w-[500px]">${row.raw_text || '-'}</td>
+                        <td class="p-3 whitespace-nowrap font-semibold" style="color:${color}">${row.predicted_label || '-'}</td>
+                        <td class="p-3 whitespace-nowrap text-xs font-mono-code">${(row.confidence_positive||0).toFixed(2)} / ${(row.confidence_negative||0).toFixed(2)} / ${(row.confidence_neutral||0).toFixed(2)}</td>`;
+                    tbody.appendChild(tr);
+                });
+
+                const totalPages = Math.max(1, Math.ceil(_batchRows.length / BATCH_PAGE_SIZE));
+                const pgEl  = document.getElementById('batch-pagination');
+                const lblEl = document.getElementById('batch-page-label');
+                const prevBtn = document.getElementById('batch-prev-btn');
+                const nextBtn = document.getElementById('batch-next-btn');
+                if (pgEl) pgEl.style.cssText = _batchRows.length > BATCH_PAGE_SIZE ? 'display:flex!important;' : 'display:none!important;';
+                if (lblEl) lblEl.textContent = `Halaman ${_batchPage + 1} dari ${totalPages}`;
+                if (prevBtn) prevBtn.disabled = _batchPage === 0;
+                if (nextBtn) nextBtn.disabled = _batchPage >= totalPages - 1;
+            }
+
+            renderBatchPage();
+
+            const bPrev = document.getElementById('batch-prev-btn');
+            const bNext = document.getElementById('batch-next-btn');
+            if (bPrev) bPrev.onclick = () => { if (_batchPage > 0) { _batchPage--; renderBatchPage(); } };
+            if (bNext) bNext.onclick = () => { const tp = Math.ceil(_batchRows.length / BATCH_PAGE_SIZE); if (_batchPage < tp - 1) { _batchPage++; renderBatchPage(); } };
         }
 
         document.getElementById('batch-download-btn')?.addEventListener('click', () => {
             if (!_csvContent) return;
             const blob = new Blob([_csvContent], { type: 'text/csv;charset=utf-8;' });
             const url  = URL.createObjectURL(blob);
-            const a    = Object.assign(document.createElement('a'), { href: url, download: 'hasil_analisis_batch.csv' });
+            const a    = document.createElement('a');
+            a.href = url;
+            a.download = 'hasil_analisis_batch.csv';
+            document.body.appendChild(a);
             a.click();
+            document.body.removeChild(a);
             URL.revokeObjectURL(url);
         });
 
         document.getElementById('batch-reset-btn')?.addEventListener('click', () => {
-            resultPanel.classList.add('hidden');
-            setStatus('');
             _csvContent = '';
             const label = document.getElementById('csv-drop-label');
             if (label) label.textContent = 'Drag and drop CSV files here';
+            showView('batch');
         });
-
-        function setStatus(msg) {
-            if (!statusEl) return;
-            statusEl.textContent = msg;
-            statusEl.classList.toggle('hidden', !msg);
-        }
     })();
 
 })();

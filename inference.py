@@ -193,15 +193,17 @@ def predict_batch(clean_texts: list[str], batch_size: int = 32) -> list[dict]:
         
         input_ids = encodings["input_ids"].to(_device)
         attention_mask = encodings["attention_mask"].to(_device)
-        
+
+        logger.debug(f"[predict_batch] batch {i//batch_size + 1}: {len(batch)} items — running model...")
         start_time = time.perf_counter()
-        
+
         with torch.no_grad():
             outputs = model(input_ids=input_ids, attention_mask=attention_mask)
-        
+
         end_time = time.perf_counter()
         batch_time_ms = (end_time - start_time) * 1000
         per_item_time = batch_time_ms / len(batch)
+        logger.debug(f"[predict_batch] batch done: {batch_time_ms:.0f}ms ({per_item_time:.0f}ms/item)")
         
         probs_batch = torch.softmax(outputs.logits, dim=-1).cpu()
         
