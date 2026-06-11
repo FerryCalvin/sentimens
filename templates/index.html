@@ -1299,14 +1299,14 @@
                 
                 // Polling logic
                 const POLL_INTERVAL_MS = 2000;
-                const MAX_ELAPSED_MS   = 300_000; // 5 minutes
+                const STALL_TIMEOUT_MS = 300_000; // 5 min without progress = truly stuck
                 const MAX_RETRIES      = 5;
                 const PER_REQ_TIMEOUT  = 30_000;  // 30 s per individual fetch
 
-                const pollStart = Date.now();
                 let fetchFailCount = 0;
                 let _displayedProgress = 0;
                 let _smoothTimer = null;
+                let _lastProgressAt = Date.now(); // reset each time progress increases
 
                 function startSmoothProgress(serverProgress, status) {
                     if (_smoothTimer) clearInterval(_smoothTimer);
@@ -1324,10 +1324,15 @@
                 }
 
                 const doPoll = async () => {
-                    if (Date.now() - pollStart > MAX_ELAPSED_MS) {
-                        if (_analysisStatus) _analysisStatus.textContent = 'Proses melebihi batas waktu (5 menit). Silakan coba lagi.';
+                    if (Date.now() - _lastProgressAt > STALL_TIMEOUT_MS) {
+                        if (_smoothTimer) clearInterval(_smoothTimer);
+                        const lStatusTxt = document.getElementById('loading-status-text');
+                        if (lStatusTxt) lStatusTxt.textContent = 'PROSES TERHENTI — COBA LAGI';
+                        if (_analysisStatus) _analysisStatus.textContent = 'Proses berhenti tanpa kemajuan selama 5 menit.';
                         newBtn.innerHTML = origHTML;
                         newBtn.disabled  = false;
+                        showView('landing');
+                        alert('Proses berhenti tanpa kemajuan selama 5 menit. Silakan coba lagi.');
                         return;
                     }
 
@@ -1348,7 +1353,10 @@
                         const lCounterVal = document.getElementById('loading-counter-val');
                         if (lStatusTxt) lStatusTxt.textContent = (statusData.message || statusData.status || 'PROCESSING').toUpperCase();
                         const serverProg = Math.round(statusData.progress || 0);
-                        if (serverProg > _displayedProgress) _displayedProgress = serverProg;
+                        if (serverProg > _displayedProgress) {
+                            _lastProgressAt = Date.now(); // pipeline masih bergerak — reset stall clock
+                            _displayedProgress = serverProg;
+                        }
                         if (lCounterVal) lCounterVal.textContent = Math.round(_displayedProgress);
                         startSmoothProgress(serverProg, statusData.status || '');
 
