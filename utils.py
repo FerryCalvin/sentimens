@@ -178,14 +178,22 @@ def load_results_from_csv(file_path: str) -> list[dict]:
             "date": "",
         })
         results = df.to_dict('records')
+        _NULL_STRINGS = {'nan', 'NaT', '<NA>'}
         for r in results:
+            # Text/date/source: also strip string sentinels emitted by Pandas
             for k in ["raw_text", "clean_text", "predicted_label", "source", "date"]:
                 val = r.get(k)
-                if not isinstance(val, str) and (pd.isna(val) or str(val) in ['nan', 'NaT', '<NA>']):
+                if val is None:
                     r[k] = ""
+                elif isinstance(val, str):
+                    if val in _NULL_STRINGS:
+                        r[k] = ""
+                elif pd.isna(val):
+                    r[k] = ""
+            # Numeric confidence: only replace non-string nulls
             for k in ["confidence_positive", "confidence_negative", "confidence_neutral"]:
                 val = r.get(k)
-                if not isinstance(val, str) and (pd.isna(val) or str(val) in ['nan', 'NaT', '<NA>']):
+                if not isinstance(val, str) and (val is None or pd.isna(val)):
                     r[k] = 0.0
 
         _results_cache[file_path] = results
@@ -515,23 +523,30 @@ def get_top_items(df: pd.DataFrame, n: int = 100) -> list:
             cols.append(c)
 
     raw_items = df.nlargest(n, 'confidence')[cols].to_dict('records')
-    
+
     # Clean up any NaN/NaT values in the final dict list to ensure strict JSON compatibility
+    _NULL_STRINGS = {'nan', 'NaT', '<NA>'}
     cleaned_items = []
     for item in raw_items:
         cleaned_item = {}
         for k, v in item.items():
-            if not isinstance(v, str) and (pd.isna(v) or str(v) in ['NaT', 'nan', '<NA>']):
-                if k in ['confidence_positif', 'confidence_negatif', 'confidence_netral', 'confidence']:
-                    cleaned_item[k] = 0.0
-                elif k == 'sentimen':
-                    cleaned_item[k] = 'Netral'
+            if v is None:
+                cleaned_item[k] = 0.0 if k in ('confidence_positif', 'confidence_negatif', 'confidence_netral', 'confidence') else (
+                    'Netral' if k == 'sentimen' else '')
+            elif isinstance(v, str):
+                # Catch string sentinels (Pandas string dtype emits these)
+                if v in _NULL_STRINGS:
+                    cleaned_item[k] = 0.0 if k in ('confidence_positif', 'confidence_negatif', 'confidence_netral', 'confidence') else (
+                        'Netral' if k == 'sentimen' else '')
                 else:
-                    cleaned_item[k] = ""
+                    cleaned_item[k] = v
+            elif pd.isna(v):
+                cleaned_item[k] = 0.0 if k in ('confidence_positif', 'confidence_negatif', 'confidence_netral', 'confidence') else (
+                    'Netral' if k == 'sentimen' else '')
             else:
                 cleaned_item[k] = v
         cleaned_items.append(cleaned_item)
-        
+
     return cleaned_items
 
 
