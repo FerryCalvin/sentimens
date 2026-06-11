@@ -3,6 +3,7 @@ import uuid
 import httpx
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from datetime import datetime
 from pathlib import Path
 
@@ -193,32 +194,43 @@ def start_scrape_pipeline(keyword: str, limit: int, sources: list[str], mode: st
             dates        = [t.get("date",     "")  for t in data]
             sources_list = [t.get("source",   "")  for t in data]
             clean_texts  = [preprocess_text(text)  for text in raw_texts]
+            clean_texts  = [t[:1000] for t in clean_texts]  # cap: cegah tokenizer hang pada teks sangat panjang
+
+            ITEM_TIMEOUT_SEC = 30
+            def _fallback_pred():
+                return {
+                    "predicted_label": "Netral",
+                    "confidence_positive": 0.333,
+                    "confidence_negative": 0.333,
+                    "confidence_neutral": 0.334,
+                    "inference_time_ms": 0.0,
+                }
 
             predictions = []
             total = len(clean_texts)
-            for i, txt in enumerate(clean_texts):
-                logger.info(f"[Inference] ({i+1}/{total}) chars={len(txt)} | {txt[:60]!r}")
-                t0 = time.perf_counter()
-                try:
-                    pred = predict_batch([txt])[0]
-                except Exception as item_err:
-                    logger.error(f"[Inference] Item {i+1} gagal: {item_err}", exc_info=True)
-                    pred = {
-                        "predicted_label": "Netral",
-                        "confidence_positive": 0.333,
-                        "confidence_negative": 0.333,
-                        "confidence_neutral": 0.334,
-                        "inference_time_ms": 0.0,
-                    }
-                elapsed_ms = (time.perf_counter() - t0) * 1000
-                logger.info(f"[Inference] ✓ ({i+1}/{total}) → {pred['predicted_label']} ({elapsed_ms:.0f}ms)")
-                predictions.append(pred)
-                time.sleep(0.05)  # release GIL so Flask can serve status polls
-                if (i + 1) % 5 == 0 or (i + 1) == total:
-                    progress = 50 + int(((i + 1) / total) * 45)
-                    _update_status(req_id, INFERENCING, f"Menganalisis sentimen... ({i+1}/{total})", progress)
+            with ThreadPoolExecutor(max_workers=1, thread_name_prefix="bert-infer") as infer_pool:
+                for i, txt in enumerate(clean_texts):
+                    logger.info(f"[Inference] ({i+1}/{total}) chars={len(txt)} | {txt[:60]!r}")
+                    t0 = time.perf_counter()
+                    future = infer_pool.submit(predict_batch, [txt])
+                    try:
+                        pred = future.result(timeout=ITEM_TIMEOUT_SEC)[0]
+                    except FuturesTimeoutError:
+                        logger.warning(f"[Inference] Item {i+1}/{total} timeout ({ITEM_TIMEOUT_SEC}s) — fallback Netral")
+                        pred = _fallback_pred()
+                    except Exception as item_err:
+                        logger.error(f"[Inference] Item {i+1} gagal: {item_err}", exc_info=True)
+                        pred = _fallback_pred()
+                    elapsed_ms = (time.perf_counter() - t0) * 1000
+                    logger.info(f"[Inference] ✓ ({i+1}/{total}) → {pred['predicted_label']} ({elapsed_ms:.0f}ms)")
+                    predictions.append(pred)
+                    time.sleep(0.05)  # release GIL so Flask can serve status polls
+                    if (i + 1) % 5 == 0 or (i + 1) == total:
+                        progress = 50 + int(((i + 1) / total) * 45)
+                        _update_status(req_id, INFERENCING, f"Menganalisis sentimen... ({i+1}/{total})", progress)
 
             _update_status(req_id, FINALIZING, "Menyusun hasil...", 95)
+            logger.info(f"[Pipeline] FINALIZING: menyusun {len(predictions)} hasil...")
 
             results = []
             for raw, clean, date, src, pred in zip(raw_texts, clean_texts, dates, sources_list, predictions):
@@ -234,22 +246,26 @@ def start_scrape_pipeline(keyword: str, limit: int, sources: list[str], mode: st
                     "inference_time_ms":   pred.get("inference_time_ms",   0.0),
                 })
 
+            logger.info(f"[Pipeline] FINALIZING: results siap, generate CSV...")
             _update_status(req_id, FINALIZING, "Menyimpan data...", 97)
 
             csv_content = generate_csv_output(results)
+            logger.info(f"[Pipeline] FINALIZING: CSV {len(csv_content)} chars, menulis ke disk...")
             file_path = DATA_DIR / f"{req_id}.csv"
             with open(file_path, "w", encoding="utf-8-sig", newline="") as f:
                 f.write(csv_content)
+            logger.info(f"[Pipeline] FINALIZING: CSV tersimpan → {file_path}")
 
             _update_status(req_id, FINALIZING, "Menghitung ringkasan...", 99)
-
             summary = calculate_summary(results)
+            logger.info(f"[Pipeline] FINALIZING: ringkasan selesai → {summary}")
 
             _update_status(req_id, COMPLETED, "Selesai", 100,
                            total_results=len(results),
                            file_path=str(file_path),
                            summary=summary,
                            keyword=keyword)
+            logger.info(f"[Pipeline] COMPLETED: {len(results)} item")
 
         except Exception as e:
             logger.error(f"Pipeline error tidak terduga: {e}", exc_info=True)
