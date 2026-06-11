@@ -355,22 +355,28 @@ async def scrape_web_search(keyword: str, limit: int, days_back: int = 7) -> Lis
 
     loop = asyncio.get_event_loop()
 
-    # Thread-based (requests)
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = {
-            executor.submit(_google_news_rss, keyword, per_src, days_back): "google_news",
-            executor.submit(_yahoo,           keyword, per_src): "yahoo",
-            executor.submit(_detik,           keyword, per_src): "detik",
-            executor.submit(_kompas,          keyword, per_src): "kompas",
-        }
-        for future in as_completed(futures, timeout=35):
-            src = futures[future]
-            try:
-                res = future.result()
-                logger.info(f"  {src}: {len(res)} hasil")
-                all_results.extend(res)
-            except Exception as e:
-                logger.warning(f"  {src} error: {e}")
+    def _run_sync_scrapers() -> List[dict]:
+        results: List[dict] = []
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = {
+                executor.submit(_google_news_rss, keyword, per_src, days_back): "google_news",
+                executor.submit(_yahoo,           keyword, per_src): "yahoo",
+                executor.submit(_detik,           keyword, per_src): "detik",
+                executor.submit(_kompas,          keyword, per_src): "kompas",
+            }
+            for future in as_completed(futures, timeout=35):
+                src = futures[future]
+                try:
+                    res = future.result()
+                    logger.info(f"  {src}: {len(res)} hasil")
+                    results.extend(res)
+                except Exception as e:
+                    logger.warning(f"  {src} error: {e}")
+        return results
+
+    # Run blocking I/O in a thread so the event loop stays free
+    sync_results = await loop.run_in_executor(None, _run_sync_scrapers)
+    all_results.extend(sync_results)
 
     # Playwright Bing sebagai tambahan jika masih kurang
     if len(all_results) < limit:

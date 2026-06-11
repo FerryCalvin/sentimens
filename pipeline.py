@@ -104,24 +104,40 @@ def _scrape_in_process(keyword: str, limit: int, sources: list, req_id: str = No
     results = []
     limit_per_source = max(5, limit // max(len(sources), 1))
 
-    if "twitter" in sources:
-        logger.info(f"[Pipeline] Social search via subprocess: {keyword}")
-        enriched = f"{keyword} pendapat komentar ulasan netizen"
-        social = _scrape_via_subprocess(enriched, limit_per_source)
-        for item in social:
-            item["source"] = "twitter"
-        results.extend(social)
-        logger.info(f"[Pipeline] Social: {len(social)} hasil")
-        if req_id:
-            _update_status(req_id, SCRAPING, f"Data sosial selesai ({len(social)} item), mengambil berita...", 25)
+    need_twitter = "twitter" in sources
+    need_web = "web" in sources or "news" in sources
 
-    if "web" in sources or "news" in sources:
-        logger.info(f"[Pipeline] Web search via subprocess: {keyword}")
-        web = _scrape_via_subprocess(keyword, limit_per_source)
-        results.extend(web)
-        logger.info(f"[Pipeline] Web: {len(web)} hasil")
-        if req_id:
-            _update_status(req_id, SCRAPING, f"Data web selesai ({len(web)} item), menyusun data...", 40)
+    if need_twitter or need_web:
+        total_sources = (1 if need_twitter else 0) + (1 if need_web else 0)
+        fetch_limit = limit_per_source * total_sources
+        logger.info(f"[Pipeline] Web search via subprocess: {keyword} | limit={fetch_limit}")
+        all_data = _scrape_via_subprocess(keyword, fetch_limit)
+        logger.info(f"[Pipeline] Subprocess: {len(all_data)} hasil total")
+
+        if need_twitter and need_web:
+            mid = len(all_data) // 2
+            twitter_data = all_data[:mid]
+            web_data = all_data[mid:]
+        elif need_twitter:
+            twitter_data = all_data
+            web_data = []
+        else:
+            twitter_data = []
+            web_data = all_data
+
+        if need_twitter:
+            for item in twitter_data:
+                item["source"] = "twitter"
+            results.extend(twitter_data)
+            logger.info(f"[Pipeline] Social (relabeled): {len(twitter_data)} hasil")
+            if req_id:
+                _update_status(req_id, SCRAPING, f"Data sosial selesai ({len(twitter_data)} item), menyusun data...", 25)
+
+        if need_web:
+            results.extend(web_data)
+            logger.info(f"[Pipeline] Web: {len(web_data)} hasil")
+            if req_id:
+                _update_status(req_id, SCRAPING, f"Data web selesai ({len(web_data)} item), menyusun data...", 40)
 
     # Deduplicate
     seen = set()
@@ -208,26 +224,28 @@ def start_scrape_pipeline(keyword: str, limit: int, sources: list[str], mode: st
 
             predictions = []
             total = len(clean_texts)
+            batch_size = 32
             with ThreadPoolExecutor(max_workers=1, thread_name_prefix="bert-infer") as infer_pool:
-                for i, txt in enumerate(clean_texts):
-                    logger.info(f"[Inference] ({i+1}/{total}) chars={len(txt)} | {txt[:60]!r}")
+                for i in range(0, total, batch_size):
+                    batch_texts = clean_texts[i : i + batch_size]
+                    logger.info(f"[Inference] Batch {i//batch_size + 1} | size={len(batch_texts)} | items {i+1}-{i+len(batch_texts)}/{total}")
                     t0 = time.perf_counter()
-                    future = infer_pool.submit(predict_batch, [txt])
+                    future = infer_pool.submit(predict_batch, batch_texts, batch_size)
                     try:
-                        pred = future.result(timeout=ITEM_TIMEOUT_SEC)[0]
+                        batch_preds = future.result(timeout=ITEM_TIMEOUT_SEC * len(batch_texts))
                     except FuturesTimeoutError:
-                        logger.warning(f"[Inference] Item {i+1}/{total} timeout ({ITEM_TIMEOUT_SEC}s) — fallback Netral")
-                        pred = _fallback_pred()
-                    except Exception as item_err:
-                        logger.error(f"[Inference] Item {i+1} gagal: {item_err}", exc_info=True)
-                        pred = _fallback_pred()
+                        logger.warning(f"[Inference] Batch {i//batch_size + 1} timeout — fallback Netral untuk {len(batch_texts)} item")
+                        batch_preds = [_fallback_pred() for _ in batch_texts]
+                    except Exception as batch_err:
+                        logger.error(f"[Inference] Batch {i//batch_size + 1} gagal: {batch_err}", exc_info=True)
+                        batch_preds = [_fallback_pred() for _ in batch_texts]
                     elapsed_ms = (time.perf_counter() - t0) * 1000
-                    logger.info(f"[Inference] ✓ ({i+1}/{total}) → {pred['predicted_label']} ({elapsed_ms:.0f}ms)")
-                    predictions.append(pred)
+                    logger.info(f"[Inference] ✓ Batch {i//batch_size + 1} selesai dalam {elapsed_ms:.0f}ms")
+                    predictions.extend(batch_preds)
+                    processed = min(i + batch_size, total)
+                    progress = 50 + int((processed / total) * 45)
+                    _update_status(req_id, INFERENCING, f"Menganalisis sentimen... ({processed}/{total})", progress)
                     time.sleep(0.05)  # release GIL so Flask can serve status polls
-                    if (i + 1) % 5 == 0 or (i + 1) == total:
-                        progress = 50 + int(((i + 1) / total) * 45)
-                        _update_status(req_id, INFERENCING, f"Menganalisis sentimen... ({i+1}/{total})", progress)
 
             _update_status(req_id, FINALIZING, "Menyusun hasil...", 95)
             logger.info(f"[Pipeline] FINALIZING: menyusun {len(predictions)} hasil...")

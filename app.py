@@ -632,7 +632,7 @@ def api_results(req_id):
             "confidence_negatif": "confidence_negative",
             "confidence_netral": "confidence_neutral",
         }
-        df.rename(columns={k: v for k, v in col_map.items() if k in df.columns})
+        df = df.rename(columns={k: v for k, v in col_map.items() if k in df.columns})
 
         # top_items and confidence_avg always from full df (for data table & model overview)
         top_items_raw = get_top_items(df, n=100)
