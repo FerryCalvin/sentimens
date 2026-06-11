@@ -6,6 +6,7 @@ import io
 import json
 import logging
 import os
+from pathlib import Path
 
 import httpx
 import pandas as pd
@@ -115,7 +116,7 @@ def analyze():
     
     try:
         # FR-ST-02: Jalankan pipeline pemrosesan
-        clean_text = preprocess_text(raw_text)
+        clean_text = preprocess_text(raw_text)[:1000]
         result = predict_sentiment(clean_text)
         
         # FR-ST-03: Siapkan data untuk ditampilkan
@@ -477,7 +478,7 @@ def api_analyze():
     raw_text = str(escape(raw_text))
 
     try:
-        clean_text = preprocess_text(raw_text)
+        clean_text = preprocess_text(raw_text)[:1000]
         result     = predict_sentiment(clean_text)
         return jsonify({
             "raw_text":            raw_text,
@@ -588,12 +589,11 @@ def api_status(req_id):
 
 @app.route("/api/results/precomputed", methods=["GET"])
 def api_precomputed():
-    import os, pandas as pd
-    from utils import get_overall_distribution, get_timeline_data, get_top_items
-    file_path = os.path.join("data", "precomputed_large.csv")
-    if not os.path.exists(file_path):
+    import os
+    from utils import get_overall_distribution, get_timeline_data, get_top_items, load_dataframe_cached
+    if not os.path.exists(os.path.join("data", "precomputed_large.csv")):
         return jsonify({"error": "Pre-computed data not found."}), 404
-    df = pd.read_csv(file_path)
+    df = load_dataframe_cached("precomputed")
     from config import MODEL_METRICS
     return jsonify({
         "distribution": get_overall_distribution(df),
@@ -607,13 +607,15 @@ def api_results(req_id):
     from pipeline import get_status
     status_data = get_status(req_id)
     if status_data.get("status") == "COMPLETED" and status_data.get("file_path"):
-        import pandas as pd
-        from utils import get_overall_distribution, get_timeline_data, get_top_items, filter_df_by_days, get_word_freq_for_df
+        from utils import get_overall_distribution, get_timeline_data, get_top_items, filter_df_by_days, get_word_freq_for_df, load_dataframe_cached
         from config import MODEL_METRICS
 
         file_path = status_data["file_path"]
         try:
-            df = pd.read_csv(file_path)
+            req_id_clean = Path(file_path).stem
+            df = load_dataframe_cached(req_id_clean)
+            if df.empty:
+                raise FileNotFoundError(file_path)
         except Exception as e:
             logger.error(f"Failed to read CSV {file_path}: {e}")
             return jsonify({"error": "Gagal membaca file hasil."}), 500
@@ -623,30 +625,19 @@ def api_results(req_id):
         days = int(days_param) if days_param and days_param.isdigit() else None
         df_filtered = filter_df_by_days(df, days) if days is not None else df
 
-        # Normalize column names: rename Indonesian to English for compatibility
-        col_map = {
-            "teks_asli": "raw_text",
-            "teks_bersih": "clean_text",
-            "sentimen": "sentimen",  # keep as-is for aggregation
-            "confidence_positif": "confidence_positive",
-            "confidence_negatif": "confidence_negative",
-            "confidence_netral": "confidence_neutral",
-        }
-        df = df.rename(columns={k: v for k, v in col_map.items() if k in df.columns})
-
-        # top_items and confidence_avg always from full df (for data table & model overview)
+        # top_items and confidence_avg use original Indonesian column names
         top_items_raw = get_top_items(df, n=100)
         top_items = []
         for item in top_items_raw:
             top_items.append({
-                "raw_text": item.get("teks_asli", ""),
-                "source": item.get("source", ""),
-                "date": str(item.get("date", "")),
-                "predicted_label": item.get("sentimen", ""),
-                "confidence_positive": float(item.get("confidence_positif", item.get("confidence", 0))),
+                "raw_text":           item.get("teks_asli", ""),
+                "source":             item.get("source", ""),
+                "date":               str(item.get("date", "")),
+                "predicted_label":    item.get("sentimen", ""),
+                "confidence_positive": float(item.get("confidence_positif", 0)),
                 "confidence_negative": float(item.get("confidence_negatif", 0)),
-                "confidence_neutral": float(item.get("confidence_netral", 0)),
-                "confidence_overall": float(item.get("confidence", 0)),
+                "confidence_neutral":  float(item.get("confidence_netral", 0)),
+                "confidence_overall":  float(item.get("confidence", 0)),
             })
 
         confidence_avg = {

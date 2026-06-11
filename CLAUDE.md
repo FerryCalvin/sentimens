@@ -11,9 +11,9 @@ Undergraduate thesis (skripsi) — a Flask web application for Indonesian-langua
 | Service | Port | Entry Point | Framework |
 |---------|------|-------------|-----------|
 | Main web app | 5000 | `app.py` | Flask |
-| Scraper microservice | 8001 | `scraper/main.py` | FastAPI + Playwright |
+| Scraper microservice | 8000 | `scraper/main.py` | Flask + Playwright (async) |
 
-Flask calls the scraper via HTTP (`httpx.post` to `http://127.0.0.1:8001/scrape`). The FastAPI service uses Playwright async to scrape Twitter and Google News concurrently.
+Flask calls the scraper via HTTP (`httpx.post` to `http://127.0.0.1:8000/scrape`). The scraper service uses `asyncio` and `async_playwright` internally to scrape Twitter and Google News concurrently, but exposes a synchronous Flask HTTP interface.
 
 ## Setup & Running the App
 
@@ -33,10 +33,10 @@ python -m playwright install chromium
 
 **Running Services:**
 ```powershell
-# Terminal 1 — FastAPI scraper
-uvicorn scraper.main:app --port 8001 --reload
+# Terminal 1 — Flask scraper (port 8000)
+python scraper/main.py
 
-# Terminal 2 — Flask main app
+# Terminal 2 — Flask main app (port 5000)
 python app.py
 ```
 
@@ -51,7 +51,7 @@ The trained model lives in `models/` and is loaded once at Flask startup. Requir
 
 **Threading & Async Background Tasks**:
 Flask runs the orchestration pipeline in the background using `threading.Thread(daemon=True)`. This avoids the complexity of Celery/Redis for a simple local demo.
-The FastAPI scraper uses `asyncio` and `async_playwright` exclusively. Do not introduce `selenium` or blocking WebDriver code into the FastAPI scraper.
+The scraper service uses `asyncio` and `async_playwright` internally. Do not introduce `selenium` or blocking WebDriver code into it.
 
 **Data Storage**:
 The pipeline stores state in an in-memory thread-safe dictionary (`_status_store` with a `threading.Lock()`).
@@ -76,5 +76,5 @@ SMTP_PORT=587
 SMTP_USER=yourmail@gmail.com
 SMTP_PASS=your_app_password
 BASE_URL=http://localhost:5000
-FASTAPI_URL=http://localhost:8001
+SCRAPER_URL=http://localhost:8000
 ```

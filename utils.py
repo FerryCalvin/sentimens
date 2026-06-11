@@ -6,15 +6,17 @@ import csv
 import json
 import logging
 from datetime import datetime
-from collections import Counter
+from collections import Counter, OrderedDict
 
 import pandas as pd
 from markupsafe import escape
 
 from config import CSV_OUTPUT_COLUMNS, LABEL_COLORS
 
-# Cache memory mapping
-_results_cache = {}
+# LRU cache with a hard cap — evicts the oldest entry when full
+_CACHE_MAX_SIZE = 50
+_results_cache: OrderedDict = OrderedDict()
+_df_cache: OrderedDict = OrderedDict()
 
 CSV_DTYPES = {
     "teks_asli": "string",
@@ -146,29 +148,29 @@ def load_results_from_csv(file_path: str) -> list[dict]:
     Ini menjamin pemuatan ke memori di bawah 3 detik.
     """
     if file_path in _results_cache:
+        _results_cache.move_to_end(file_path)  # LRU: mark as recently used
         return _results_cache[file_path]
-        
+
     try:
-        # Gunakan strict dtypes dan memory mapping via engine='c'
         df = pd.read_csv(
-            file_path, 
+            file_path,
             dtype=CSV_DTYPES,
             usecols=CSV_OUTPUT_COLUMNS,
             engine='c'
         )
-        
-        results = []
-        for _, row in df.iterrows():
-            results.append({
-                "raw_text": row["teks_asli"],
-                "clean_text": row["teks_bersih"],
-                "predicted_label": row["sentimen"],
-                "confidence_positive": row["confidence_positif"],
-                "confidence_negative": row["confidence_negatif"],
-                "confidence_neutral": row["confidence_netral"],
-            })
-            
+        df = df.rename(columns={
+            "teks_asli": "raw_text",
+            "teks_bersih": "clean_text",
+            "sentimen": "predicted_label",
+            "confidence_positif": "confidence_positive",
+            "confidence_negatif": "confidence_negative",
+            "confidence_netral": "confidence_neutral",
+        })
+        results = df.to_dict('records')
+
         _results_cache[file_path] = results
+        if len(_results_cache) > _CACHE_MAX_SIZE:
+            _results_cache.popitem(last=False)  # evict least recently used
         return results
     except Exception as e:
         logger.error(f"Failed to load CSV: {e}")
@@ -350,6 +352,18 @@ def load_dataframe(request_id: str) -> pd.DataFrame:
         engine='c'
     )
 
+def load_dataframe_cached(request_id: str) -> pd.DataFrame:
+    """Load DataFrame with LRU cache to avoid redundant disk I/O on repeated polls."""
+    if request_id in _df_cache:
+        _df_cache.move_to_end(request_id)
+        return _df_cache[request_id]
+    df = load_dataframe(request_id)
+    if not df.empty:
+        _df_cache[request_id] = df
+        if len(_df_cache) > _CACHE_MAX_SIZE:
+            _df_cache.popitem(last=False)
+    return df
+
 def get_results(request_id: str) -> dict:
     """Return cached aggregated results, atau hitung dan cache jika belum ada."""
     if request_id not in _results_cache:
@@ -357,6 +371,8 @@ def get_results(request_id: str) -> dict:
         if df.empty:
             return {}
         _results_cache[request_id] = build_results(df)
+        if len(_results_cache) > _CACHE_MAX_SIZE:
+            _results_cache.popitem(last=False)
     return _results_cache[request_id]
 
 def build_results(df: pd.DataFrame) -> dict:
@@ -375,13 +391,12 @@ def build_timeline(df: pd.DataFrame) -> dict:
         if col not in grouped.columns:
             grouped[col] = 0
             
-    # Frontend expects: summary.timeline[date].Positif
     result = {}
-    for date, row in grouped.iterrows():
+    for date, row in grouped.to_dict(orient='index').items():
         result[str(date)] = {
             "Positif": int(row.get('Positif', 0)),
-            "Netral": int(row.get('Netral', 0)),
-            "Negatif": int(row.get('Negatif', 0))
+            "Netral":  int(row.get('Netral',  0)),
+            "Negatif": int(row.get('Negatif', 0)),
         }
     return result
 
@@ -448,11 +463,11 @@ def get_timeline_data(df: pd.DataFrame) -> list:
                 grouped[col] = 0
 
         result = []
-        for date_val, row in grouped.iterrows():
+        for date_val, row in grouped.to_dict(orient='index').items():
             result.append({
-                "date": str(date_val),
+                "date":     str(date_val),
                 "positive": int(row.get('Positif', 0)),
-                "neutral": int(row.get('Netral', 0)),
+                "neutral":  int(row.get('Netral',  0)),
                 "negative": int(row.get('Negatif', 0)),
             })
         return result

@@ -4,7 +4,6 @@ import httpx
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
-from datetime import datetime
 from pathlib import Path
 
 from config import SCRAPER_BASE_URL, SCRAPER_ENDPOINT, SCRAPER_TIMEOUT
@@ -17,6 +16,7 @@ logger = logging.getLogger(__name__)
 # State Store: memory dictionary protected by lock
 _status_store = {}
 _status_lock = threading.Lock()
+_STATUS_TTL_SEC = 3600  # evict completed/failed jobs older than 1 hour
 
 # States
 PENDING = "PENDING"
@@ -31,21 +31,36 @@ DATA_DIR.mkdir(exist_ok=True)
 
 def _update_status(req_id: str, status: str, message: str = "", progress: int = 0, **kwargs):
     with _status_lock:
+        _evict_old_statuses()
         if req_id not in _status_store:
             _status_store[req_id] = {
                 "id": req_id,
-                "created_at": datetime.now().isoformat(),
+                "created_at": time.time(),
             }
         _status_store[req_id].update({
             "status": status,
             "message": message,
             "progress": progress,
-            "updated_at": datetime.now().isoformat(),
+            "updated_at": time.time(),
             **kwargs
         })
 
+def _evict_old_statuses():
+    """Remove terminal-state jobs older than _STATUS_TTL_SEC to prevent unbounded growth."""
+    cutoff = time.time() - _STATUS_TTL_SEC
+    terminal = (COMPLETED, FAILED)
+    stale = [
+        rid for rid, s in _status_store.items()
+        if s.get("status") in terminal
+        and s.get("created_at", 0) < cutoff
+    ]
+    for rid in stale:
+        del _status_store[rid]
+
+
 def get_status(req_id: str) -> dict:
     with _status_lock:
+        _evict_old_statuses()
         return _status_store.get(req_id, {"status": "NOT_FOUND"})
 
 
@@ -300,10 +315,41 @@ def start_batch_pipeline(raw_texts: list[str]) -> str:
     def _run():
         try:
             _update_status(req_id, INFERENCING, f"Memproses {len(raw_texts)} baris data...", 10)
-            
-            clean_texts = [preprocess_text(str(text).strip()) if str(text).strip() else "" for text in raw_texts]
-            predictions = predict_batch(clean_texts)
-            
+
+            clean_texts = [
+                preprocess_text(str(text).strip())[:1000] if str(text).strip() else ""
+                for text in raw_texts
+            ]
+
+            def _fallback_pred():
+                return {
+                    "predicted_label": "Netral",
+                    "confidence_positive": 0.333,
+                    "confidence_negative": 0.333,
+                    "confidence_neutral": 0.334,
+                    "inference_time_ms": 0.0,
+                }
+
+            predictions = []
+            total = len(clean_texts)
+            batch_size = 32
+            with ThreadPoolExecutor(max_workers=1, thread_name_prefix="bert-infer") as infer_pool:
+                for i in range(0, total, batch_size):
+                    batch_texts = clean_texts[i : i + batch_size]
+                    future = infer_pool.submit(predict_batch, batch_texts, batch_size)
+                    try:
+                        batch_preds = future.result(timeout=30 * len(batch_texts))
+                    except FuturesTimeoutError:
+                        logger.warning(f"[Batch] Timeout pada batch {i//batch_size + 1} — fallback Netral")
+                        batch_preds = [_fallback_pred() for _ in batch_texts]
+                    except Exception as batch_err:
+                        logger.error(f"[Batch] Inference error: {batch_err}", exc_info=True)
+                        batch_preds = [_fallback_pred() for _ in batch_texts]
+                    predictions.extend(batch_preds)
+                    processed = min(i + batch_size, total)
+                    progress = 10 + int((processed / total) * 85)
+                    _update_status(req_id, INFERENCING, f"Menganalisis sentimen... ({processed}/{total})", progress)
+
             results = []
             for raw, clean, pred in zip(raw_texts, clean_texts, predictions):
                 raw_str = str(raw).strip()
