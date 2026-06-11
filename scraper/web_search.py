@@ -11,6 +11,7 @@ Pipeline (semua PARALEL):
 Tidak ada masalah execution context karena requests dipisah dari Playwright.
 """
 import asyncio
+import os
 import uuid
 import logging
 import random
