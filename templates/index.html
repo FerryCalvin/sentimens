@@ -491,6 +491,7 @@
   </div>
   <!-- State: Result -->
   <div id="eval-result-state" class="hidden flex-col gap-2 pt-1">
+    <p id="eval-source-label" class="text-[10px] text-on-surface/40 italic -mt-1"></p>
     <div id="eval-summary" class="grid grid-cols-4 gap-1 text-center"></div>
     <table class="w-full border-collapse text-xs mt-1">
       <thead class="text-primary">
@@ -504,7 +505,7 @@
       </thead>
       <tbody id="eval-table-body" class="text-on-surface-variant divide-y divide-outline-variant/10"></tbody>
     </table>
-    <button id="eval-reset-btn" class="mt-1 text-xs text-on-surface/40 hover:text-primary transition-colors self-start">↺ Upload ulang</button>
+    <button id="eval-reset-btn" class="mt-1 text-xs text-on-surface/40 hover:text-primary transition-colors self-start">↺ Upload CSV berlabel</button>
   </div>
 </div>
 </div>
@@ -1244,6 +1245,8 @@
 
     // isPrecomputedView must be at IIFE scope so the analyze-btn handler can access it
     let isPrecomputedView = false;
+    // Bridge to auto-populate eval panel from training metrics; set by the eval IIFE below
+    let _evalAutoPopulate = null;
 
     // --- Cek status model saat load ---
     fetch('/api/health').then(r => r.json()).then(d => {
@@ -1543,7 +1546,7 @@
             fontFamily: "'Geist', monospace",
             color: () => palette[Math.floor(Math.random() * palette.length)],
             backgroundColor: 'transparent',
-            rotateRatio: 0.2,
+            rotateRatio: 0,
             shrinkToFit: true,
             clearCanvas: true,
         });
@@ -1626,6 +1629,16 @@
 
         // Word Cloud
         renderWordCloud(apiData.word_freq || []);
+
+        // Evaluasi Model — auto-populate from training metrics
+        const mm = apiData.model_metrics;
+        if (_evalAutoPopulate && mm && mm.Accuracy != null) {
+            _evalAutoPopulate({
+                accuracy: mm.Accuracy,
+                macro: { precision: mm.Precision, recall: mm.Recall, f1: mm.F1_Score },
+                per_class: mm.per_class,
+            }, 'training');
+        }
 
         // Doughnut Chart — distribusi sentimen
         const sum = apiData.summary || { positive_count: 0, neutral_count: 0, negative_count: 0 };
@@ -1910,7 +1923,11 @@
             });
         }
 
-        function renderEvalResult(data) {
+        function renderEvalResult(data, source) {
+            const sourceLabel = document.getElementById('eval-source-label');
+            if (sourceLabel) {
+                sourceLabel.textContent = source === 'training' ? 'Metrik pelatihan model' : 'Evaluasi kustom';
+            }
             const summary = document.getElementById('eval-summary');
             if (summary) {
                 summary.innerHTML = [
@@ -1940,6 +1957,12 @@
             }
         }
 
+        // Expose bridge for initChartsWithData to auto-populate from training metrics
+        _evalAutoPopulate = function(metrics, source) {
+            renderEvalResult(metrics, source);
+            showEvalState('result');
+        };
+
         input.addEventListener('change', async function() {
             if (!this.files[0]) return;
             showEvalState('loading');
@@ -1949,7 +1972,7 @@
                 const res = await fetch('/api/evaluate', { method: 'POST', body: fd });
                 const data = await res.json();
                 if (data.error) { alert(data.error); showEvalState('upload'); return; }
-                renderEvalResult(data);
+                renderEvalResult(data, 'custom');
                 showEvalState('result');
             } catch (e) {
                 alert('Terjadi kesalahan saat evaluasi.');

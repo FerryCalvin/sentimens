@@ -124,18 +124,26 @@ def get_word_frequencies(texts: list[str]) -> dict[str, int]:
     """
     word_freq: dict[str, int] = {}
     
-    # Stopwords Bahasa Indonesia yang umum (untuk word cloud saja, bukan analisis)
+    # Stopwords (untuk word cloud saja, bukan analisis)
     stopwords_wc = {
+        # Indonesia
         "yang", "dan", "di", "ke", "dari", "ini", "itu", "dengan",
         "adalah", "untuk", "atau", "pada", "tidak", "juga", "dalam",
-        "ada", "akan", "itu", "ini", "saya", "kami", "kita", "mereka",
-        "dia", "ia", "anda", "kamu", "yang", "bisa", "sudah", "sudah",
-        "lebih", "juga", "sangat", "sudah", "telah", "itu", "saat",
-        "hanya", "jadi", "bisa", "agar", "karena", "maka", "jika",
-        "tapi", "namun", "bahwa", "nya", "pun", "lagi", "sudah",
+        "ada", "akan", "saya", "kami", "kita", "mereka",
+        "dia", "ia", "anda", "kamu", "bisa", "sudah",
+        "lebih", "sangat", "telah", "saat",
+        "hanya", "jadi", "agar", "karena", "maka", "jika",
+        "tapi", "namun", "bahwa", "nya", "pun", "lagi",
         "belum", "masih", "pernah", "selalu", "sering", "jarang",
-        "mau", "ingin", "perlu", "harus", "boleh", "bukan", "bukan",
-        "sama", "seperti", "yaitu", "yaitu", "serta", "baik", "hal",
+        "mau", "ingin", "perlu", "harus", "boleh", "bukan",
+        "sama", "seperti", "yaitu", "serta", "baik", "hal",
+        # English function words
+        "the", "was", "is", "are", "for", "with", "from", "has", "have", "been",
+        "that", "this", "but", "not", "you", "him", "her", "its", "they", "our",
+        "who", "can", "had", "what", "how", "when", "were", "will", "would", "could",
+        "should", "their", "there", "them", "all", "any", "also", "just", "into",
+        "then", "than", "more", "some", "such", "these", "those", "after", "before",
+        "while", "about", "said", "over", "under", "each", "out", "one", "two",
     }
     
     for text in texts:
