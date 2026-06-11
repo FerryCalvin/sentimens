@@ -2,6 +2,7 @@
 # inference.py — Modul Inferensi IndoBERT
 # Mengimplementasikan FR-AI-01 s/d FR-AI-05
 # ============================================================
+import threading
 import time
 import logging
 from pathlib import Path
@@ -22,6 +23,7 @@ logger = logging.getLogger(__name__)
 _model: BertForSequenceClassification | None = None
 _tokenizer = None
 _device: torch.device = torch.device("cpu")
+_inference_lock = threading.Lock()
 
 
 def load_model():
@@ -116,17 +118,17 @@ def predict_sentiment(clean_text: str) -> dict:
     encoding = tokenizer(
         clean_text,
         max_length=MAX_TOKEN_LENGTH,
-        padding="max_length",
+        padding=True,
         truncation=True,
         return_tensors="pt",
     )
-    
+
     # Pindahkan tensor ke device yang sesuai
     input_ids = encoding["input_ids"].to(_device)
     attention_mask = encoding["attention_mask"].to(_device)
-    
-    # FR-AI-02: Jalankan inferensi dalam mode no_grad
-    with torch.no_grad():
+
+    # FR-AI-02: Jalankan inferensi dalam mode no_grad; lock serializes concurrent requests
+    with _inference_lock, torch.no_grad():
         outputs = model(input_ids=input_ids, attention_mask=attention_mask)
     
     # FR-AI-03: Normalisasi probabilitas dengan softmax
@@ -197,7 +199,7 @@ def predict_batch(clean_texts: list[str], batch_size: int = 32) -> list[dict]:
         logger.debug(f"[predict_batch] batch {i//batch_size + 1}: {len(batch)} items — running model...")
         start_time = time.perf_counter()
 
-        with torch.no_grad():
+        with _inference_lock, torch.no_grad():
             outputs = model(input_ids=input_ids, attention_mask=attention_mask)
 
         end_time = time.perf_counter()

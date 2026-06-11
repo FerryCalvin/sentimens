@@ -295,6 +295,7 @@ async def _bing_playwright(keyword: str, limit: int) -> List[dict]:
     _CHROME_PATHS = [
         r"C:\Program Files\Google\Chrome\Application\chrome.exe",
         r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Google", "Chrome", "Application", "chrome.exe"),
     ]
     chrome_path = next((p for p in _CHROME_PATHS if __import__("pathlib").Path(p).exists()), None)
     if not chrome_path:

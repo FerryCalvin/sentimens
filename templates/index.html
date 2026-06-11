@@ -1793,36 +1793,112 @@
             if (lCounter) lCounter.textContent = '0';
             showView('loading');
 
-            // Simulate smooth progress while waiting for synchronous API
-            let fakeProgress = 0;
-            const fakeTimer = setInterval(() => {
-                fakeProgress = Math.min(fakeProgress + 1.2, 85);
-                if (lCounter) lCounter.textContent = Math.round(fakeProgress);
-                if (lStatus) {
-                    if (fakeProgress < 30) lStatus.textContent = 'MEMBACA CSV';
-                    else if (fakeProgress < 60) lStatus.textContent = 'MENGANALISIS SENTIMEN';
-                    else lStatus.textContent = 'MENYUSUN HASIL';
-                }
-            }, 300);
-
             const fd = new FormData();
             fd.append('csv_file', file);
 
+            let reqId;
             try {
                 const res  = await fetch('/api/batch', { method: 'POST', body: fd });
                 const data = await res.json();
-                clearInterval(fakeTimer);
-                if (lCounter) lCounter.textContent = '100';
-                if (lStatus)  lStatus.textContent  = 'SELESAI';
-                if (!res.ok) throw new Error(data.error || 'Gagal memproses CSV');
-                _csvContent = data.csv_content || '';
-                renderBatchResults(data, file.name);
-                showView('batch-results');
+                if (!res.ok) throw new Error(data.error || 'Gagal memulai pemrosesan CSV');
+                reqId = data.req_id;
             } catch (err) {
-                clearInterval(fakeTimer);
                 alert('Error: ' + err.message);
                 showView('batch');
+                return;
             }
+
+            // Poll /api/status/<reqId> until COMPLETED or FAILED
+            const POLL_INTERVAL_MS = 2000;
+            const STALL_TIMEOUT_MS = 300_000;
+            const MAX_RETRIES      = 5;
+            const PER_REQ_TIMEOUT  = 30_000;
+
+            let fetchFailCount   = 0;
+            let _displayedProg   = 0;
+            let _smoothTimer     = null;
+            let _lastProgressAt  = Date.now();
+
+            function startSmoothProg(serverProg) {
+                if (_smoothTimer) clearInterval(_smoothTimer);
+                _smoothTimer = setInterval(() => {
+                    if (_displayedProg < serverProg) {
+                        _displayedProg = Math.min(_displayedProg + 0.5, serverProg);
+                        if (lCounter) lCounter.textContent = Math.round(_displayedProg);
+                    } else {
+                        clearInterval(_smoothTimer);
+                    }
+                }, 150);
+            }
+
+            const doPoll = async () => {
+                if (Date.now() - _lastProgressAt > STALL_TIMEOUT_MS) {
+                    if (_smoothTimer) clearInterval(_smoothTimer);
+                    if (lStatus) lStatus.textContent = 'PROSES TERHENTI — COBA LAGI';
+                    showView('batch');
+                    alert('Proses berhenti tanpa kemajuan selama 5 menit. Silakan coba lagi.');
+                    return;
+                }
+
+                const controller = new AbortController();
+                const tid = setTimeout(() => controller.abort(), PER_REQ_TIMEOUT);
+
+                try {
+                    const statusRes  = await fetch(`/api/status/${reqId}`, { signal: controller.signal });
+                    clearTimeout(tid);
+                    fetchFailCount = 0;
+
+                    const statusData = await statusRes.json();
+                    const serverProg = Math.round(statusData.progress || 0);
+                    if (lStatus)  lStatus.textContent  = (statusData.message || statusData.status || 'PROCESSING').toUpperCase();
+                    if (serverProg > _displayedProg) {
+                        _lastProgressAt = Date.now();
+                        _displayedProg  = serverProg;
+                    }
+                    if (lCounter) lCounter.textContent = Math.round(_displayedProg);
+                    startSmoothProg(serverProg);
+
+                    if (statusData.status === 'COMPLETED') {
+                        if (_smoothTimer) clearInterval(_smoothTimer);
+                        if (lCounter) lCounter.textContent = '100';
+                        try {
+                            const resR  = await fetch(`/api/batch/results/${reqId}`);
+                            const resData = await resR.json();
+                            if (!resR.ok) throw new Error(resData.error || 'Gagal memuat hasil');
+                            _csvContent = resData.csv_content || '';
+                            renderBatchResults(resData, file.name);
+                            showView('batch-results');
+                        } catch (fetchErr) {
+                            alert('Error memuat hasil: ' + fetchErr.message);
+                            showView('batch');
+                        }
+                        return;
+                    }
+
+                    if (statusData.status === 'FAILED' || statusData.status === 'NOT_FOUND') {
+                        if (_smoothTimer) clearInterval(_smoothTimer);
+                        alert('Proses gagal: ' + (statusData.message || 'Error tidak diketahui'));
+                        showView('batch');
+                        return;
+                    }
+
+                } catch (pollErr) {
+                    clearTimeout(tid);
+                    fetchFailCount++;
+                    if (fetchFailCount >= MAX_RETRIES) {
+                        if (_smoothTimer) clearInterval(_smoothTimer);
+                        alert('Error: ' + pollErr.message);
+                        showView('batch');
+                        return;
+                    }
+                    setTimeout(doPoll, 3000);
+                    return;
+                }
+
+                setTimeout(doPoll, POLL_INTERVAL_MS);
+            };
+
+            doPoll();
         }
 
         function renderBatchResults(data, filename) {

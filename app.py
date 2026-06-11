@@ -496,7 +496,7 @@ def api_analyze():
 
 @app.route("/api/batch", methods=["POST"])
 def api_batch():
-    """JSON endpoint batch CSV — dipanggil SPA via fetch() + FormData."""
+    """JSON endpoint batch CSV — starts background pipeline, returns req_id for polling."""
     if not MODEL_LOADED:
         return jsonify({"error": "Model belum dimuat."}), 503
 
@@ -510,38 +510,50 @@ def api_batch():
         return jsonify({"error": "Tidak dapat mendeteksi kolom teks."}), 400
 
     try:
-        raw_texts   = df[text_col].fillna("").tolist()
-        clean_texts = [preprocess_text(str(t).strip()) if str(t).strip() else "" for t in raw_texts]
-        predictions = predict_batch(clean_texts)
-
-        results = []
-        for raw, clean, pred in zip(raw_texts, clean_texts, predictions):
-            raw_str  = str(raw).strip()
-            is_empty = not raw_str or not clean
-            if is_empty:
-                pred["skipped"] = True
-            results.append({
-                "raw_text":            raw_str,
-                "clean_text":          clean,
-                "predicted_label":     pred.get("predicted_label", "Netral"),
-                "confidence_positive": pred.get("confidence_positive", 0.0),
-                "confidence_negative": pred.get("confidence_negative", 0.0),
-                "confidence_neutral":  pred.get("confidence_neutral",  0.0),
-                "inference_time_ms":   pred.get("inference_time_ms",   0.0),
-                "skipped":             pred.get("skipped", False),
-            })
-
-        summary    = calculate_summary(results)
-        csv_output = generate_csv_output(results)
-        return jsonify({
-            "results":       results[:100],
-            "total_results": len(results),
-            "summary":       summary,
-            "csv_content":   csv_output,
-        })
+        raw_texts = df[text_col].fillna("").tolist()
+        from pipeline import start_batch_pipeline
+        req_id = start_batch_pipeline(raw_texts)
+        return jsonify({"status": "ok", "req_id": req_id})
     except Exception as e:
         logger.error(f"/api/batch error: {e}", exc_info=True)
         return jsonify({"error": "Terjadi kesalahan saat memproses CSV."}), 500
+
+
+@app.route("/api/batch/results/<req_id>", methods=["GET"])
+def api_batch_results(req_id):
+    """Return completed batch results for download and display."""
+    from pipeline import get_status
+    from utils import load_results_from_csv
+
+    req_id_clean = sanitize_input(str(req_id))
+    status_data = get_status(req_id_clean)
+
+    if status_data.get("status") == "FAILED":
+        return jsonify({"error": status_data.get("message", "Pemrosesan gagal.")}), 500
+
+    if status_data.get("status") != "COMPLETED" or not status_data.get("file_path"):
+        return jsonify({"error": "Results not ready or not found."}), 404
+
+    file_path = status_data["file_path"]
+    try:
+        results = load_results_from_csv(file_path)
+    except Exception as e:
+        logger.error(f"/api/batch/results load error: {e}")
+        return jsonify({"error": "Gagal membaca file hasil."}), 500
+
+    try:
+        with open(file_path, encoding="utf-8-sig") as f:
+            csv_content = f.read()
+    except Exception:
+        csv_content = generate_csv_output(results)
+
+    summary = status_data.get("summary") or calculate_summary(results)
+    return jsonify({
+        "results":       results[:100],
+        "total_results": status_data.get("total_results", len(results)),
+        "summary":       summary,
+        "csv_content":   csv_content,
+    })
 
 
 @app.route("/api/scrape", methods=["POST"])
@@ -690,7 +702,7 @@ def api_evaluate():
     if df.empty:
         return jsonify({"error": "Tidak ada baris valid setelah filtering label."}), 400
 
-    texts = df["teks_asli"].astype(str).tolist()
+    texts = [t[:1000] for t in df["teks_asli"].astype(str).tolist()]
     true_labels = df["label_asli"].astype(str).tolist()
 
     predictions = predict_batch(texts)
