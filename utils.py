@@ -166,7 +166,27 @@ def load_results_from_csv(file_path: str) -> list[dict]:
             "confidence_negatif": "confidence_negative",
             "confidence_netral": "confidence_neutral",
         })
+        # Replace NaN/None values to ensure valid JSON serialization (no NaNs inside list of dicts)
+        df = df.fillna({
+            "raw_text": "",
+            "clean_text": "",
+            "predicted_label": "Netral",
+            "confidence_positive": 0.0,
+            "confidence_negative": 0.0,
+            "confidence_neutral": 0.0,
+            "source": "",
+            "date": "",
+        })
         results = df.to_dict('records')
+        for r in results:
+            for k in ["raw_text", "clean_text", "predicted_label", "source", "date"]:
+                val = r.get(k)
+                if not isinstance(val, str) and (pd.isna(val) or str(val) in ['nan', 'NaT', '<NA>']):
+                    r[k] = ""
+            for k in ["confidence_positive", "confidence_negative", "confidence_neutral"]:
+                val = r.get(k)
+                if not isinstance(val, str) and (pd.isna(val) or str(val) in ['nan', 'NaT', '<NA>']):
+                    r[k] = 0.0
 
         _results_cache[file_path] = results
         if len(_results_cache) > _CACHE_MAX_SIZE:
@@ -480,6 +500,10 @@ def get_top_items(df: pd.DataFrame, n: int = 100) -> list:
     if df.empty:
         return []
     df = df.copy()
+    df['confidence_positif'] = df['confidence_positif'].fillna(0.0)
+    df['confidence_negatif'] = df['confidence_negatif'].fillna(0.0)
+    df['confidence_netral'] = df['confidence_netral'].fillna(0.0)
+
     df['confidence'] = df[[
         'confidence_positif', 'confidence_netral', 'confidence_negatif'
     ]].max(axis=1)
@@ -490,7 +514,25 @@ def get_top_items(df: pd.DataFrame, n: int = 100) -> list:
         if c in df.columns:
             cols.append(c)
 
-    return df.nlargest(n, 'confidence')[cols].to_dict('records')
+    raw_items = df.nlargest(n, 'confidence')[cols].to_dict('records')
+    
+    # Clean up any NaN/NaT values in the final dict list to ensure strict JSON compatibility
+    cleaned_items = []
+    for item in raw_items:
+        cleaned_item = {}
+        for k, v in item.items():
+            if not isinstance(v, str) and (pd.isna(v) or str(v) in ['NaT', 'nan', '<NA>']):
+                if k in ['confidence_positif', 'confidence_negatif', 'confidence_netral', 'confidence']:
+                    cleaned_item[k] = 0.0
+                elif k == 'sentimen':
+                    cleaned_item[k] = 'Netral'
+                else:
+                    cleaned_item[k] = ""
+            else:
+                cleaned_item[k] = v
+        cleaned_items.append(cleaned_item)
+        
+    return cleaned_items
 
 
 def compute_evaluation_metrics(true_labels: list, pred_labels: list) -> dict:

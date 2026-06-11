@@ -652,10 +652,19 @@ def api_results(req_id):
                 "confidence_overall":  float(item.get("confidence", 0)),
             })
 
+        import pandas as pd
+        def safe_mean_pct(series):
+            if series.empty:
+                return 0.0
+            val = series.mean()
+            if pd.isna(val):
+                return 0.0
+            return round(float(val) * 100, 1)
+
         confidence_avg = {
-            "positive": round(float(df["confidence_positif"].mean()) * 100, 1) if "confidence_positif" in df.columns else 0.0,
-            "neutral":  round(float(df["confidence_netral"].mean())  * 100, 1) if "confidence_netral"  in df.columns else 0.0,
-            "negative": round(float(df["confidence_negatif"].mean()) * 100, 1) if "confidence_negatif" in df.columns else 0.0,
+            "positive": safe_mean_pct(df["confidence_positif"]) if "confidence_positif" in df.columns else 0.0,
+            "neutral":  safe_mean_pct(df["confidence_netral"])  if "confidence_netral"  in df.columns else 0.0,
+            "negative": safe_mean_pct(df["confidence_negatif"]) if "confidence_negatif" in df.columns else 0.0,
         }
 
         # timeline, distribution, and word_freq respect the active date filter
