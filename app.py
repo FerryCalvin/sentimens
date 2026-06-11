@@ -646,6 +646,7 @@ def api_results(req_id):
                 "confidence_positive": float(item.get("confidence_positif", item.get("confidence", 0))),
                 "confidence_negative": float(item.get("confidence_negatif", 0)),
                 "confidence_neutral": float(item.get("confidence_netral", 0)),
+                "confidence_overall": float(item.get("confidence", 0)),
             })
 
         confidence_avg = {
@@ -672,6 +673,39 @@ def api_results(req_id):
             "total_results":  status_data.get("total_results", len(df)),
         })
     return jsonify({"error": "Results not ready or not found."}), 404
+
+
+@app.route("/api/evaluate", methods=["POST"])
+def api_evaluate():
+    import pandas as pd
+    from inference import predict_batch
+    from utils import compute_evaluation_metrics
+
+    file = request.files.get("file")
+    if not file:
+        return jsonify({"error": "File tidak ditemukan."}), 400
+
+    try:
+        df = pd.read_csv(file)
+    except Exception:
+        return jsonify({"error": "File CSV tidak valid."}), 400
+
+    if "teks_asli" not in df.columns or "label_asli" not in df.columns:
+        return jsonify({"error": "CSV harus memiliki kolom 'teks_asli' dan 'label_asli'."}), 400
+
+    df = df.dropna(subset=["teks_asli", "label_asli"])
+    valid_labels = {"Positif", "Negatif", "Netral"}
+    df = df[df["label_asli"].isin(valid_labels)]
+    if df.empty:
+        return jsonify({"error": "Tidak ada baris valid setelah filtering label."}), 400
+
+    texts = df["teks_asli"].astype(str).tolist()
+    true_labels = df["label_asli"].astype(str).tolist()
+
+    predictions = predict_batch(texts)
+    pred_labels = [p["predicted_label"] for p in predictions]
+
+    return jsonify(compute_evaluation_metrics(true_labels, pred_labels))
 
 
 # Error Handlers (NFR-S-05)

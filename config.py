@@ -59,11 +59,16 @@ CSV_OUTPUT_COLUMNS = [
     "date",
 ]
 
-# --- Model Evaluation Metrics ---
+# --- Model Evaluation Metrics (hasil testing pada FINAL_TEST_verified, n=1873) ---
 MODEL_METRICS = {
-    "Accuracy":  82.0,
-    "Precision": 81.0,
-    "Recall":    84.0,
-    "F1_Score":  82.0,
+    "Accuracy":  90.76,
+    "Precision": 88.12,
+    "Recall":    85.70,
+    "F1_Score":  86.73,
+    "per_class": {
+        "Negatif": {"precision": 89.38, "recall": 94.52, "f1": 91.88, "support": 730},
+        "Netral":  {"precision": 80.68, "recall": 69.01, "f1": 74.39, "support": 242},
+        "Positif": {"precision": 94.30, "recall": 93.56, "f1": 93.93, "support": 901},
+    },
 }
 

@@ -468,14 +468,42 @@ def get_top_items(df: pd.DataFrame, n: int = 100) -> list:
     df['confidence'] = df[[
         'confidence_positif', 'confidence_netral', 'confidence_negatif'
     ]].max(axis=1)
-    
-    # Required columns
+
     cols = []
-    for c in ['teks_asli', 'source', 'date', 'sentimen', 'confidence']:
+    for c in ['teks_asli', 'source', 'date', 'sentimen',
+              'confidence_positif', 'confidence_negatif', 'confidence_netral', 'confidence']:
         if c in df.columns:
             cols.append(c)
-            
+
     return df.nlargest(n, 'confidence')[cols].to_dict('records')
+
+
+def compute_evaluation_metrics(true_labels: list, pred_labels: list) -> dict:
+    from sklearn.metrics import accuracy_score, precision_recall_fscore_support, confusion_matrix
+    labels = ["Negatif", "Netral", "Positif"]
+    acc = accuracy_score(true_labels, pred_labels)
+    p, r, f1, support = precision_recall_fscore_support(
+        true_labels, pred_labels, labels=labels, average=None, zero_division=0
+    )
+    cm = confusion_matrix(true_labels, pred_labels, labels=labels)
+    return {
+        "accuracy": round(acc * 100, 2),
+        "macro": {
+            "precision": round(float(p.mean()) * 100, 2),
+            "recall":    round(float(r.mean()) * 100, 2),
+            "f1":        round(float(f1.mean()) * 100, 2),
+        },
+        "per_class": {
+            labels[i]: {
+                "precision": round(float(p[i]) * 100, 2),
+                "recall":    round(float(r[i]) * 100, 2),
+                "f1":        round(float(f1[i]) * 100, 2),
+                "support":   int(support[i]),
+            }
+            for i in range(len(labels))
+        },
+        "confusion_matrix": cm.tolist(),
+    }
 
 def send_notification(email: str, topic: str, request_id: str, item_count: int):
     """FR-EM-01: Send email notification."""

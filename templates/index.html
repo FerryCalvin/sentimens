@@ -393,6 +393,12 @@
 <a class="font-body-base text-body-base text-primary border-b-2 border-primary pb-1 active:scale-95 transition-transform duration-200" href="#" id="nav-start">Main</a>
 <a class="font-body-base text-body-base text-on-surface-variant hover:text-on-surface transition-colors active:scale-95 transition-transform duration-200" href="#" id="nav-batch">Batch CSV Analysis</a>
 </div>
+<div class="hidden lg:flex items-center gap-2 text-xs font-mono-code text-on-surface-variant/70 border border-on-surface/10 rounded px-2.5 py-1 ui-element" title="Metrik evaluasi model IndoBERT (n=1873)">
+  <span class="material-symbols-outlined text-[13px] text-primary">analytics</span>
+  <span>Acc <strong class="text-primary">90.76%</strong></span>
+  <span class="text-on-surface/20 mx-1">|</span>
+  <span>F1 <strong class="text-primary">86.73%</strong></span>
+</div>
 <div class="flex items-center gap-base ui-element">
 <button aria-label="Toggle dark mode" class="p-2 rounded-full hover:bg-on-surface/5 text-primary active:scale-95 transition-transform duration-200">
 <span class="material-symbols-outlined">dark_mode</span>
@@ -465,11 +471,41 @@
   <p id="wordcloud-empty" class="text-on-surface-variant text-sm" style="display:none;">Tidak ada data teks.</p>
 </div>
 </div>
-<!-- Confusion Matrix (static) -->
-<div class="chart-container col-span-1">
-<h3 class="font-label-caps text-label-caps text-on-surface-variant mb-4 uppercase">Confusion Matrix</h3>
-<div class="h-64 relative w-full flex justify-center items-center">
-  <img src="/static/confusion_matrix.png" alt="Confusion Matrix" class="max-h-full max-w-full object-contain rounded"/>
+<!-- Evaluasi Dinamis -->
+<div class="chart-container col-span-1" id="eval-panel">
+<h3 class="font-label-caps text-label-caps text-on-surface-variant mb-4 uppercase">Evaluasi Model</h3>
+<div class="h-64 flex flex-col gap-2 overflow-y-auto custom-scrollbar">
+  <!-- State: Upload -->
+  <div id="eval-upload-state" class="flex flex-col items-center justify-center h-full gap-3">
+    <label for="eval-csv-input" class="cursor-pointer flex flex-col items-center gap-2 border border-dashed border-on-surface/20 rounded-lg px-4 py-5 w-full hover:bg-on-surface/5 transition-colors">
+      <span class="material-symbols-outlined text-3xl text-primary">upload_file</span>
+      <span class="text-sm text-on-surface-variant">Upload CSV Berlabel</span>
+      <span class="text-xs text-on-surface/40">Kolom: teks_asli, label_asli</span>
+    </label>
+    <input type="file" id="eval-csv-input" accept=".csv" class="hidden">
+  </div>
+  <!-- State: Loading -->
+  <div id="eval-loading-state" class="hidden items-center justify-center h-full gap-2 text-on-surface-variant text-sm">
+    <span class="material-symbols-outlined text-primary" style="animation: spin 1s linear infinite">progress_activity</span>
+    Mengevaluasi...
+  </div>
+  <!-- State: Result -->
+  <div id="eval-result-state" class="hidden flex-col gap-2 pt-1">
+    <div id="eval-summary" class="grid grid-cols-4 gap-1 text-center"></div>
+    <table class="w-full border-collapse text-xs mt-1">
+      <thead class="text-primary">
+        <tr>
+          <th class="p-1 text-left font-semibold">Kelas</th>
+          <th class="p-1 font-semibold">Prec</th>
+          <th class="p-1 font-semibold">Rec</th>
+          <th class="p-1 font-semibold">F1</th>
+          <th class="p-1 font-semibold text-on-surface/40">N</th>
+        </tr>
+      </thead>
+      <tbody id="eval-table-body" class="text-on-surface-variant divide-y divide-outline-variant/10"></tbody>
+    </table>
+    <button id="eval-reset-btn" class="mt-1 text-xs text-on-surface/40 hover:text-primary transition-colors self-start">↺ Upload ulang</button>
+  </div>
 </div>
 </div>
 <!-- Distribusi Sentimen -->
@@ -492,6 +528,7 @@
                     <th class="p-3 border-b border-outline-variant/30 font-semibold w-1/2">Text</th>
                     <th class="p-3 border-b border-outline-variant/30 font-semibold whitespace-nowrap">Label</th>
                     <th class="p-3 border-b border-outline-variant/30 font-semibold whitespace-nowrap">Conf (Pos/Neg/Neu)</th>
+                    <th class="p-3 border-b border-outline-variant/30 font-semibold whitespace-nowrap">Conf</th>
                 </tr>
             </thead>
             <tbody id="datasetTableBody" class="text-on-surface-variant divide-y divide-outline-variant/10">
@@ -1668,6 +1705,7 @@
                         <td class="p-3 text-sm leading-relaxed">${row.raw_text || row.text || '-'}</td>
                         <td class="p-3 whitespace-nowrap font-semibold" style="color: ${labelColor}">${row.predicted_label || '-'}</td>
                         <td class="p-3 whitespace-nowrap text-xs font-mono-code">${(row.confidence_positive || 0).toFixed(2)} / ${(row.confidence_negative || 0).toFixed(2)} / ${(row.confidence_neutral || 0).toFixed(2)}</td>
+                        <td class="p-3 whitespace-nowrap text-xs font-mono-code font-semibold text-primary">${(((row.confidence_overall || row.confidence || 0) * 100)).toFixed(1)}%</td>
                     `;
                     tbody.appendChild(tr);
                 });
@@ -1842,6 +1880,77 @@
             if (label) label.textContent = 'Drag and drop CSV files here';
             showView('batch');
         });
+    })();
+
+    // --- Evaluasi Dinamis ---
+    (function() {
+        const input = document.getElementById('eval-csv-input');
+        if (!input) return;
+
+        function showEvalState(state) {
+            ['upload', 'loading', 'result'].forEach(s => {
+                const el = document.getElementById(`eval-${s}-state`);
+                if (!el) return;
+                if (s === state) {
+                    el.classList.remove('hidden');
+                    el.style.display = s === 'loading' ? 'flex' : s === 'result' ? 'flex' : '';
+                    el.classList.add('flex');
+                } else {
+                    el.classList.add('hidden');
+                    el.classList.remove('flex');
+                }
+            });
+        }
+
+        function renderEvalResult(data) {
+            const summary = document.getElementById('eval-summary');
+            if (summary) {
+                summary.innerHTML = [
+                    { label: 'Akurasi',  val: data.accuracy + '%' },
+                    { label: 'Presisi',  val: data.macro.precision + '%' },
+                    { label: 'Recall',   val: data.macro.recall + '%' },
+                    { label: 'F1-Macro', val: data.macro.f1 + '%' },
+                ].map(({ label, val }) =>
+                    `<div class="bg-on-surface/5 rounded p-1">
+                       <div class="text-primary font-bold text-sm">${val}</div>
+                       <div class="text-on-surface/40 text-[10px] uppercase">${label}</div>
+                     </div>`
+                ).join('');
+            }
+            const tbody = document.getElementById('eval-table-body');
+            if (tbody && data.per_class) {
+                tbody.innerHTML = Object.entries(data.per_class).map(([cls, m]) => {
+                    const clsColor = cls === 'Positif' ? '#d9e2ff' : cls === 'Negatif' ? '#ffb4ab' : '#515f78';
+                    return `<tr class="hover:bg-on-surface/5">
+                        <td class="p-1 font-semibold" style="color:${clsColor}">${cls}</td>
+                        <td class="p-1 text-center">${m.precision}</td>
+                        <td class="p-1 text-center">${m.recall}</td>
+                        <td class="p-1 text-center">${m.f1}</td>
+                        <td class="p-1 text-center text-on-surface/40">${m.support}</td>
+                    </tr>`;
+                }).join('');
+            }
+        }
+
+        input.addEventListener('change', async function() {
+            if (!this.files[0]) return;
+            showEvalState('loading');
+            const fd = new FormData();
+            fd.append('file', this.files[0]);
+            try {
+                const res = await fetch('/api/evaluate', { method: 'POST', body: fd });
+                const data = await res.json();
+                if (data.error) { alert(data.error); showEvalState('upload'); return; }
+                renderEvalResult(data);
+                showEvalState('result');
+            } catch (e) {
+                alert('Terjadi kesalahan saat evaluasi.');
+                showEvalState('upload');
+            }
+            this.value = '';
+        });
+
+        document.getElementById('eval-reset-btn')?.addEventListener('click', () => showEvalState('upload'));
     })();
 
 })();
