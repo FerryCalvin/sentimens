@@ -17,3 +17,4 @@ models/
 data/*.csv
 data
 datasets_verif
+raw/
