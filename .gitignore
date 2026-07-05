@@ -8,6 +8,7 @@ __pycache__/
 *.env
 scraper/twitter_session.json
 scraper/cookies_config.json
+scraper/threads_cookies_config.json
 .env
 
 # Models

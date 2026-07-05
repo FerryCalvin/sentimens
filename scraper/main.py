@@ -40,12 +40,18 @@ def run_async(coro):
         loop.close()
 
 
-async def _scrape_parallel(keyword: str, twitter_limit: int, web_limit: int, threads_limit: int, sources: list, days_back: int = 7) -> dict:
+async def _scrape_parallel(keyword: str, expanded_keyword: str, twitter_limit: int, web_limit: int, threads_limit: int, sources: list, days_back: int = 7) -> dict:
     """
     Jalankan Twitter + Web search + Threads secara PARALEL menggunakan asyncio.gather.
 
     Twitter dan Threads adalah sumber utama — masing-masing mendapat jatah penuh.
     Web search berjalan bersamaan sebagai enrichment (web_limit).
+
+    Twitter dan web dapat `expanded_keyword` (hasil LLM query expansion — query
+    Boolean bergaya Twitter/X, mis. `("kopi" OR "coffee") jakarta`). Threads dapat
+    `keyword` asli apa adanya: mesin pencari Threads tidak memahami sintaks Boolean/
+    tanda kutip tsb dan akan mengembalikan nol hasil jika diberi query itu
+    (diverifikasi langsung — bukan asumsi).
     """
     from twitter import scrape_twitter
     from web_search import scrape_web_search
@@ -55,11 +61,11 @@ async def _scrape_parallel(keyword: str, twitter_limit: int, web_limit: int, thr
     labels = []
 
     if "twitter" in sources:
-        tasks.append(scrape_twitter(keyword, twitter_limit, days_back=days_back))
+        tasks.append(scrape_twitter(expanded_keyword, twitter_limit, days_back=days_back))
         labels.append("twitter")
 
     if "web" in sources or "news" in sources:
-        tasks.append(scrape_web_search(keyword, web_limit, days_back=days_back))
+        tasks.append(scrape_web_search(expanded_keyword, web_limit, days_back=days_back))
         labels.append("web")
 
     if "threads" in sources:
@@ -110,10 +116,26 @@ def health():
     else:
         tw_status = "tidak ada — jalankan: python export_twitter_cookies.py"
 
+    # Cek threads_cookies_config.json
+    threads_cookies_file = scraper_dir / "threads_cookies_config.json"
+    threads_cookies_ok = False
+    if threads_cookies_file.exists():
+        try:
+            tc = json.loads(threads_cookies_file.read_text())
+            threads_cookies_ok = bool(tc.get("sessionid"))
+        except Exception:
+            pass
+
+    threads_status = (
+        "cookie aktif (inject langsung)" if threads_cookies_ok
+        else "tidak ada — akses anonim (batas ~20 hasil/keyword). jalankan: python export_threads_cookies.py"
+    )
+
     return jsonify({
         "status": "ok",
         "scrapers": ["twitter", "web", "threads"],
         "twitter_auth": tw_status,
+        "threads_auth": threads_status,
     })
 
 
@@ -163,7 +185,7 @@ def scrape():
         expanded_keyword = expand_query(keyword)
 
         # Jalankan paralel
-        scraped = run_async(_scrape_parallel(expanded_keyword, twitter_limit, web_limit, threads_limit, sources, days_back=days_back))
+        scraped = run_async(_scrape_parallel(keyword, expanded_keyword, twitter_limit, web_limit, threads_limit, sources, days_back=days_back))
 
         twitter_results = scraped.get("twitter", [])
         web_results     = scraped.get("web", [])
