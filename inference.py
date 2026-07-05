@@ -164,14 +164,15 @@ def predict_sentiment(clean_text: str) -> dict:
     }
 
 
-def predict_batch(clean_texts: list[str], batch_size: int = 32) -> list[dict]:
+def predict_batch(clean_texts: list[str], batch_size: int = 32, progress_cb=None) -> list[dict]:
     """
     Inferensi batch untuk efisiensi pemrosesan banyak teks.
-    
+
     Args:
         clean_texts: List teks yang sudah dipreprocess
         batch_size: Ukuran batch untuk inferensi
-        
+        progress_cb: Optional callable(done, total) dipanggil setelah tiap batch selesai
+
     Returns:
         List hasil inferensi per teks
     """
@@ -225,5 +226,8 @@ def predict_batch(clean_texts: list[str], batch_size: int = 32) -> list[dict]:
                 "label_index": label_idx,
                 "skipped": original_was_empty,
             })
-    
+
+        if progress_cb:
+            progress_cb(min(i + batch_size, len(clean_texts)), len(clean_texts))
+
     return results

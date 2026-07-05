@@ -2,7 +2,7 @@ import uuid
 import httpx
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 from pathlib import Path
 
 from config import SCRAPER_BASE_URL, SCRAPER_ENDPOINT, SCRAPER_TIMEOUT
@@ -16,9 +16,9 @@ DATA_DIR = Path("data")
 DATA_DIR.mkdir(exist_ok=True)
 
 
-def _scrape_via_subprocess(keyword: str, limit: int) -> list:
+def _scrape_via_subprocess(keyword: str, limit: int, source_type: str) -> list:
     """
-    Jalankan scraper_worker.py sebagai subprocess terpisah.
+    Jalankan scraper_worker.py sebagai subprocess terpisah untuk satu source.
     Playwright butuh proses clean — tidak bisa spawn dari Flask thread.
 
     FIX #2 — Windows Encoding:
@@ -40,7 +40,7 @@ def _scrape_via_subprocess(keyword: str, limit: int) -> list:
 
     try:
         result = subprocess.run(
-            [python, worker, keyword, str(limit)],
+            [python, worker, keyword, str(limit), source_type],
             capture_output=True,
             text=True,
             encoding="utf-8",    # FIX #2: paksa UTF-8, bukan cp1252
@@ -50,57 +50,59 @@ def _scrape_via_subprocess(keyword: str, limit: int) -> list:
             env=env,
         )
         if result.returncode != 0:
-            logger.warning(f"[Worker] stderr: {result.stderr[:400]}")
+            logger.warning(f"[Worker:{source_type}] stderr: {result.stderr[:400]}")
 
         stdout = result.stdout.strip() if result.stdout else ""
         if stdout:
-            return _json.loads(stdout)
+            data = _json.loads(stdout)
+            for item in data:
+                item["source"] = source_type
+            return data
         return []
     except subprocess.TimeoutExpired:
-        logger.error("[Worker] Subprocess timeout (300s)")
+        logger.error(f"[Worker:{source_type}] Subprocess timeout (300s)")
         return []
     except Exception as e:
-        logger.error(f"[Worker] Subprocess error: {e}")
+        logger.error(f"[Worker:{source_type}] Subprocess error: {e}")
         return []
 
 
-def _scrape_in_process(keyword: str, limit: int, sources: list) -> list:
+def _scrape_in_process(keyword: str, limit: int, sources: list, progress_cb=None) -> list:
     """
-    Scrape menggunakan subprocess worker terpisah per source.
+    Scrape semua source yang diminta secara paralel, masing-masing lewat
+    subprocess worker terpisah (fallback saat scraper service eksternal mati).
     """
+    need_sources = []
+    if "twitter" in sources:
+        need_sources.append("twitter")
+    if "web" in sources or "news" in sources:
+        need_sources.append("web")
+    if "threads" in sources:
+        need_sources.append("threads")
+
     results = []
-    limit_per_source = max(5, limit // max(len(sources), 1))
+    if need_sources:
+        limit_per_source = max(5, limit // len(need_sources))
+        logger.info(f"[Pipeline] Fallback in-process scraping: {keyword} | sources={need_sources}")
 
-    need_twitter = "twitter" in sources
-    need_web = "web" in sources or "news" in sources
-
-    if need_twitter or need_web:
-        total_sources = (1 if need_twitter else 0) + (1 if need_web else 0)
-        fetch_limit = limit_per_source * total_sources
-        logger.info(f"[Pipeline] Web search via subprocess: {keyword} | limit={fetch_limit}")
-        all_data = _scrape_via_subprocess(keyword, fetch_limit)
-        logger.info(f"[Pipeline] Subprocess: {len(all_data)} hasil total")
-
-        if need_twitter and need_web:
-            mid = len(all_data) // 2
-            twitter_data = all_data[:mid]
-            web_data = all_data[mid:]
-        elif need_twitter:
-            twitter_data = all_data
-            web_data = []
-        else:
-            twitter_data = []
-            web_data = all_data
-
-        if need_twitter:
-            for item in twitter_data:
-                item["source"] = "twitter"
-            results.extend(twitter_data)
-            logger.info(f"[Pipeline] Social (relabeled): {len(twitter_data)} hasil")
-
-        if need_web:
-            results.extend(web_data)
-            logger.info(f"[Pipeline] Web: {len(web_data)} hasil")
+        done_count = 0
+        with ThreadPoolExecutor(max_workers=len(need_sources), thread_name_prefix="scrape-fallback") as pool:
+            futures = {
+                pool.submit(_scrape_via_subprocess, keyword, limit_per_source, src): src
+                for src in need_sources
+            }
+            for future in as_completed(futures):
+                src = futures[future]
+                try:
+                    data = future.result()
+                except Exception as e:
+                    logger.error(f"[Pipeline] Fallback {src} gagal: {e}")
+                    data = []
+                results.extend(data)
+                done_count += 1
+                logger.info(f"[Pipeline] Fallback {src}: {len(data)} hasil")
+                if progress_cb:
+                    progress_cb(done_count, len(need_sources))
 
     # Deduplicate
     seen = set()
@@ -124,12 +126,16 @@ def _fallback_pred() -> dict:
     }
 
 
-def _predict_all(clean_texts: list[str]) -> list[dict]:
+def _noop_progress(stage: str, percent: int, message: str = "") -> None:
+    pass
+
+
+def _predict_all(clean_texts: list[str], progress_cb=None) -> list[dict]:
     """Jalankan inferensi batch dengan satu timeout keseluruhan sebagai jaring pengaman."""
     if not clean_texts:
         return []
     with ThreadPoolExecutor(max_workers=1, thread_name_prefix="bert-infer") as pool:
-        future = pool.submit(predict_batch, clean_texts)
+        future = pool.submit(predict_batch, clean_texts, 32, progress_cb)
         try:
             return future.result(timeout=30 * len(clean_texts))
         except FuturesTimeoutError:
@@ -140,8 +146,19 @@ def _predict_all(clean_texts: list[str]) -> list[dict]:
             return [_fallback_pred() for _ in clean_texts]
 
 
-def run_scrape_pipeline(keyword: str, limit: int, sources: list[str], mode: str = "live", days_back: int = 7) -> dict:
-    req_id = str(uuid.uuid4())
+def run_scrape_pipeline(
+    keyword: str,
+    limit: int,
+    sources: list[str],
+    mode: str = "live",
+    days_back: int = 7,
+    req_id: str | None = None,
+    progress_cb=None,
+) -> dict:
+    req_id = req_id or str(uuid.uuid4())
+    progress_cb = progress_cb or _noop_progress
+
+    progress_cb("scraping", 5, "Mengambil data dari Twitter/X, Web, dan Threads...")
 
     try:
         scraper_url = f"{SCRAPER_BASE_URL}{SCRAPER_ENDPOINT}"
@@ -164,7 +181,14 @@ def run_scrape_pipeline(keyword: str, limit: int, sources: list[str], mode: str 
             data = []
     except Exception as ext_err:
         logger.warning(f"[Pipeline] Scraper eksternal tidak tersedia ({ext_err}), pakai in-process scraping")
-        data = _scrape_in_process(keyword, limit, sources)
+
+        def _scrape_sub_cb(done: int, total: int) -> None:
+            pct = 5 + int(45 * done / total) if total else 50
+            progress_cb("scraping", pct, f"Scraping fallback: {done}/{total} sumber selesai")
+
+        data = _scrape_in_process(keyword, limit, sources, progress_cb=_scrape_sub_cb)
+
+    progress_cb("scraping", 50, "Scraping selesai.")
 
     # Graceful handling jika 0 hasil — buat CSV kosong agar dashboard tidak error.
     if not data:
@@ -184,11 +208,18 @@ def run_scrape_pipeline(keyword: str, limit: int, sources: list[str], mode: str 
     raw_texts    = [t.get("raw_text", "") for t in data]
     dates        = [t.get("date",     "") for t in data]
     sources_list = [t.get("source",   "") for t in data]
+
+    progress_cb("preprocessing", 55, "Praproses teks...")
     clean_texts  = [preprocess_text(text)[:1000] for text in raw_texts]  # cap: cegah tokenizer hang
+    progress_cb("preprocessing", 60, "Praproses selesai.")
+
+    def _infer_cb(done: int, total: int) -> None:
+        pct = 60 + int(40 * done / total) if total else 100
+        progress_cb("predicting", pct, f"Menganalisis sentimen ({done}/{total})...")
 
     logger.info(f"[Pipeline] Menganalisis sentimen untuk {len(clean_texts)} item...")
     t0 = time.perf_counter()
-    predictions = _predict_all(clean_texts)
+    predictions = _predict_all(clean_texts, progress_cb=_infer_cb)
     logger.info(f"[Pipeline] Inferensi selesai dalam {(time.perf_counter() - t0) * 1000:.0f}ms")
 
     results = []
@@ -223,16 +254,23 @@ def run_scrape_pipeline(keyword: str, limit: int, sources: list[str], mode: str 
     }
 
 
-def run_batch_pipeline(raw_texts: list[str]) -> dict:
-    req_id = str(uuid.uuid4())
+def run_batch_pipeline(raw_texts: list[str], req_id: str | None = None, progress_cb=None) -> dict:
+    req_id = req_id or str(uuid.uuid4())
+    progress_cb = progress_cb or _noop_progress
 
+    progress_cb("preprocessing", 2, "Praproses data...")
     clean_texts = [
         preprocess_text(str(text).strip())[:1000] if str(text).strip() else ""
         for text in raw_texts
     ]
+    progress_cb("preprocessing", 10, "Praproses selesai.")
+
+    def _infer_cb(done: int, total: int) -> None:
+        pct = 10 + int(90 * done / total) if total else 100
+        progress_cb("predicting", pct, f"Menganalisis sentimen ({done}/{total})...")
 
     logger.info(f"[Batch] Menganalisis sentimen untuk {len(clean_texts)} baris...")
-    predictions = _predict_all(clean_texts)
+    predictions = _predict_all(clean_texts, progress_cb=_infer_cb)
 
     results = []
     for raw, clean, pred in zip(raw_texts, clean_texts, predictions):

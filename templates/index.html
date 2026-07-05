@@ -286,6 +286,7 @@
 
         .chart-container {
             background: rgba(7, 18, 42, 0.6);
+            -webkit-backdrop-filter: blur(10px);
             backdrop-filter: blur(10px);
             border: 1px solid rgba(217, 226, 255, 0.1);
             border-radius: 0.5rem;
@@ -380,6 +381,25 @@
             transition: transform 0.1s ease-out;
             transform-style: preserve-3d;
         }
+
+        .initial-hidden {
+            display: none;
+        }
+
+        .glass-panel-dark {
+            background: rgba(7, 18, 42, 0.92);
+        }
+
+        .hide-important {
+            display: none !important;
+        }
+
+        #interactive-cranium {
+            background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuAUtfhZ6Rl6vtqzC4jZYFMb3o5m9DK48ecODhfQgWBa2qn1SCbfWeH01xCIQtXXWkXT2qYttQ-o6zfFmpQL7zRyVamKDSS-pOQgv39ch9BdWoedcuJIGNseJD-vLSQHj38vT11Ns_uT3YE3S5CNUZbx6bKAaMCADmQjUXZDXkq3IyEQpPLs9SvNTvLOBoClhKxgUYhHVqtZPrek-Lq2SgT2nozU4PBzgaEEm4uMzLwL3lrTwl9xVTF81rrLZnkHZCDTMNv65t_awm4');
+            background-size: cover;
+            background-position: center;
+            filter: grayscale(100%) contrast(150%) brightness(1.2);
+        }
     </style>
 </head>
 <body class="bg-surface-dim text-on-surface antialiased min-h-screen flex flex-col font-body-base">
@@ -392,17 +412,6 @@
 <div class="hidden md:flex gap-gutter ui-element">
 <a class="font-body-base text-body-base text-primary border-b-2 border-primary pb-1 active:scale-95 transition-transform duration-200" href="#" id="nav-start">Main</a>
 <a class="font-body-base text-body-base text-on-surface-variant hover:text-on-surface transition-colors active:scale-95 transition-transform duration-200" href="#" id="nav-batch">Batch CSV Analysis</a>
-</div>
-<div class="hidden lg:flex items-center gap-2 text-xs font-mono-code text-on-surface-variant/70 border border-on-surface/10 rounded px-2.5 py-1 ui-element" title="Metrik evaluasi model IndoBERT (n=1873)">
-  <span class="material-symbols-outlined text-[13px] text-primary">analytics</span>
-  <span>Acc <strong class="text-primary">90.76%</strong></span>
-  <span class="text-on-surface/20 mx-1">|</span>
-  <span>F1 <strong class="text-primary">86.73%</strong></span>
-</div>
-<div class="flex items-center gap-base ui-element">
-<button aria-label="Toggle dark mode" class="p-2 rounded-full hover:bg-on-surface/5 text-primary active:scale-95 transition-transform duration-200">
-<span class="material-symbols-outlined">dark_mode</span>
-</button>
 </div>
 </div>
 </nav>
@@ -418,11 +427,6 @@
 <div class="w-full max-w-md flex flex-col gap-4 ui-element">
 <div class="relative w-full">
 <input class="glass-input w-full bg-surface-bright/5 backdrop-blur-xl border border-on-surface/10 rounded px-4 py-3 font-mono-code text-mono-code text-on-surface placeholder-terminal-placeholder transition-all duration-300" id="topic-input" placeholder="Enter a topic..." type="text"/>
-</div>
-<div class="flex items-center justify-center gap-4 text-sm text-on-surface-variant" id="source-checkboxes">
-<label class="flex items-center gap-1.5 cursor-pointer hover:text-on-surface transition-colors"><input type="checkbox" id="source-twitter" class="accent-primary" checked> Twitter/X</label>
-<label class="flex items-center gap-1.5 cursor-pointer hover:text-on-surface transition-colors"><input type="checkbox" id="source-web" class="accent-primary" checked> Web/News</label>
-<label class="flex items-center gap-1.5 cursor-pointer hover:text-on-surface transition-colors"><input type="checkbox" id="source-threads" class="accent-primary" checked> Threads</label>
 </div>
 <button class="w-full bg-on-surface text-surface-dim font-label-caps text-label-caps uppercase py-3 px-6 rounded hover:opacity-90 active:scale-95 transition-all duration-200 flex items-center justify-center gap-2" id="analyze-btn">
                     Analyze
@@ -481,7 +485,7 @@
 <h3 class="font-label-caps text-label-caps text-on-surface-variant mb-4 uppercase">Kata Dominan</h3>
 <div class="h-64 relative w-full flex justify-center items-center" id="wordcloud-container">
   <canvas id="wordCloudCanvas"></canvas>
-  <p id="wordcloud-empty" class="text-on-surface-variant text-sm" style="display:none;">Tidak ada data teks.</p>
+  <p id="wordcloud-empty" class="text-on-surface-variant text-sm initial-hidden">Tidak ada data teks.</p>
 </div>
 </div>
 <!-- Evaluasi Dinamis -->
@@ -499,7 +503,7 @@
   </div>
   <!-- State: Loading -->
   <div id="eval-loading-state" class="hidden items-center justify-center h-full gap-2 text-on-surface-variant text-sm">
-    <span class="material-symbols-outlined text-primary" style="animation: spin 1s linear infinite">progress_activity</span>
+    <span class="material-symbols-outlined text-primary animate-spin">progress_activity</span>
     Mengevaluasi...
   </div>
   <!-- State: Result -->
@@ -530,7 +534,7 @@
 </div>
 
 <!-- Data Table View -->
-<div class="chart-container col-span-1 md:col-span-2 lg:col-span-3" style="background: rgba(7, 18, 42, 0.92);">
+<div class="chart-container col-span-1 md:col-span-2 lg:col-span-3 glass-panel-dark">
     <h3 class="font-label-caps text-label-caps text-on-surface-variant mb-4 uppercase">Scraped Dataset Preview</h3>
     <div class="overflow-x-auto max-h-96 custom-scrollbar">
         <table class="w-full text-left font-body-base text-sm border-collapse" id="datasetTable">
@@ -549,7 +553,7 @@
             </tbody>
         </table>
     </div>
-    <div class="flex items-center justify-between mt-3 px-1 ui-element" id="analysis-pagination" style="display:none!important;">
+    <div class="flex items-center justify-between mt-3 px-1 ui-element hide-important" id="analysis-pagination">
         <button id="analysis-prev-btn" class="flex items-center gap-1 px-3 py-1.5 rounded border border-outline-variant/40 text-on-surface-variant text-sm hover:bg-on-surface/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
             <span class="material-symbols-outlined text-[16px]">arrow_back</span> Prev
         </button>
@@ -600,7 +604,7 @@
         </div>
     </div>
     <div id="batch-summary" class="flex flex-wrap gap-4"></div>
-    <div class="w-full overflow-x-auto rounded-lg border border-outline-variant/20" style="background: rgba(7, 18, 42, 0.92);">
+    <div class="w-full overflow-x-auto rounded-lg border border-outline-variant/20 glass-panel-dark">
         <table class="w-full text-sm text-left">
             <thead class="bg-surface-dim text-on-surface-variant uppercase text-xs font-semibold">
                 <tr>
@@ -612,7 +616,7 @@
             <tbody id="batch-table-body" class="divide-y divide-outline-variant/10 text-on-surface-variant"></tbody>
         </table>
     </div>
-    <div class="flex items-center justify-between mt-3 px-1 ui-element" id="batch-pagination" style="display:none!important;">
+    <div class="flex items-center justify-between mt-3 px-1 ui-element hide-important" id="batch-pagination">
         <button id="batch-prev-btn" class="flex items-center gap-1 px-3 py-1.5 rounded border border-outline-variant/40 text-on-surface-variant text-sm hover:bg-on-surface/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
             <span class="material-symbols-outlined text-[16px]">arrow_back</span> Prev
         </button>
@@ -641,7 +645,7 @@
         <div class="w-24 h-[1px] bg-outline-variant/30 mt-1"></div>
     </div>
     <!-- Central Silhouette -->
-    <div class="relative w-[300px] h-[400px] md:w-[400px] md:h-[500px] z-10 opacity-90 mix-blend-screen interactive-head-container pulse-head" id="interactive-cranium" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuAUtfhZ6Rl6vtqzC4jZYFMb3o5m9DK48ecODhfQgWBa2qn1SCbfWeH01xCIQtXXWkXT2qYttQ-o6zfFmpQL7zRyVamKDSS-pOQgv39ch9BdWoedcuJIGNseJD-vLSQHj38vT11Ns_uT3YE3S5CNUZbx6bKAaMCADmQjUXZDXkq3IyEQpPLs9SvNTvLOBoClhKxgUYhHVqtZPrek-Lq2SgT2nozU4PBzgaEEm4uMzLwL3lrTwl9xVTF81rrLZnkHZCDTMNv65t_awm4'); background-size: cover; background-position: center; filter: grayscale(100%) contrast(150%) brightness(1.2);">
+    <div class="relative w-[300px] h-[400px] md:w-[400px] md:h-[500px] z-10 opacity-90 mix-blend-screen interactive-head-container pulse-head" id="interactive-cranium">
         <!-- Hairline Frame -->
         <div class="absolute inset-0 border border-outline-variant/30 rounded-full blur-[2px]"></div>
         <!-- Data Swarm: Dense Orbiting Text Layers -->
@@ -1269,19 +1273,6 @@
     // Bridge to auto-populate eval panel from training metrics; set by the eval IIFE below
     let _evalAutoPopulate = null;
 
-    // --- Cek status model saat load ---
-    fetch('/api/health').then(r => r.json()).then(d => {
-        // Ubah teks tombol dark_mode menjadi status model (elemen nav sudah ada)
-        const btn = document.querySelector('button[aria-label="Toggle dark mode"]');
-        if (btn) {
-            btn.innerHTML = d.model_loaded
-                ? '<span class="material-symbols-outlined" style="color:#4ade80;font-size:16px">circle</span>'
-                : '<span class="material-symbols-outlined" style="color:#ffb4ab;font-size:16px">circle</span>';
-            btn.title = d.model_loaded ? 'Model Aktif' : 'Model Gagal Dimuat';
-            btn.style.cursor = 'default';
-        }
-    }).catch(() => {});
-
     // --- Simpan referensi initCharts asli (sudah dideklarasikan di atas) ---
     // Intercept tombol Analyze yang sudah ada (#analyze-btn)
     // Ganti handler click agar memanggil backend nyata, lalu tampilkan view seperti biasa
@@ -1295,18 +1286,6 @@
         const newBtn = _analyzeBtn.cloneNode(true);
         _analyzeBtn.parentNode.replaceChild(newBtn, _analyzeBtn);
 
-        function getSelectedSources() {
-            const boxes = [
-                ['twitter', 'source-twitter'],
-                ['web',     'source-web'],
-                ['threads', 'source-threads'],
-            ];
-            const selected = boxes
-                .filter(([, id]) => { const el = document.getElementById(id); return !el || el.checked; })
-                .map(([name]) => name);
-            return selected.length ? selected : ['twitter', 'web', 'threads'];
-        }
-
         newBtn.addEventListener('click', async () => {
             const text = _topicInput.value.trim();
             if (!text) return;
@@ -1318,35 +1297,50 @@
 
             const lStatusTxt = document.getElementById('loading-status-text');
             const lCounterVal = document.getElementById('loading-counter-val');
-            let elapsedTimer = null;
+            let pollTimer = null;
 
             try {
                 const limit    = (window.APP_CONFIG && window.APP_CONFIG.limit)    || 200;
                 const daysBack = (window.APP_CONFIG && window.APP_CONFIG.daysBack) || 7;
-                const sources  = getSelectedSources();
+                const sources  = ['twitter', 'web', 'threads'];
 
                 if (_analysisStatus) _analysisStatus.textContent = 'Mengambil dan menganalisis data...';
                 if (_analysisTitle)  _analysisTitle.textContent  = `Analysis: ${text}`;
                 if (lStatusTxt) lStatusTxt.textContent = 'MEMPROSES';
+                if (lCounterVal) lCounterVal.textContent = '0';
                 showView('loading');
 
-                // Proses sekarang sinkron di server — tampilkan penghitung waktu berjalan
-                // sebagai indikator kosmetik (bukan persentase progres nyata).
-                const startedAt = Date.now();
-                elapsedTimer = setInterval(() => {
-                    if (lCounterVal) lCounterVal.textContent = Math.floor((Date.now() - startedAt) / 1000) + 's';
-                }, 250);
-
-                const res  = await fetch('/api/scrape', {
+                const queueRes = await fetch('/api/scrape', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ keyword: text, limit: limit, days_back: daysBack, sources: sources, mode: "live" })
                 });
-                clearInterval(elapsedTimer);
-                const finalData = await res.json();
-                if (!res.ok) throw new Error(finalData.error || 'Gagal memproses analisis');
+                const queueData = await queueRes.json();
+                if (!queueRes.ok) throw new Error(queueData.error || 'Gagal memulai analisis');
 
-                if (lCounterVal) lCounterVal.textContent = '100';
+                const finalData = await new Promise((resolve, reject) => {
+                    pollTimer = setInterval(async () => {
+                        try {
+                            const statusRes = await fetch(`/api/scrape/status/${queueData.job_id}`);
+                            const statusData = await statusRes.json();
+                            if (!statusRes.ok) throw new Error(statusData.error || 'Job tidak ditemukan');
+
+                            if (lCounterVal) lCounterVal.textContent = String(statusData.percent ?? 0);
+                            if (lStatusTxt && statusData.message) lStatusTxt.textContent = statusData.message;
+
+                            if (statusData.status === 'done') {
+                                clearInterval(pollTimer);
+                                resolve(statusData.result);
+                            } else if (statusData.status === 'error') {
+                                clearInterval(pollTimer);
+                                reject(new Error(statusData.error || 'Gagal memproses analisis'));
+                            }
+                        } catch (pollErr) {
+                            clearInterval(pollTimer);
+                            reject(pollErr);
+                        }
+                    }, 700);
+                });
 
                 if (finalData.total_results === 0) {
                     if (_analysisTitle)  _analysisTitle.textContent  = `Analysis: ${text}`;
@@ -1389,7 +1383,7 @@
                 newBtn.disabled  = false;
 
             } catch(err) {
-                if (elapsedTimer) clearInterval(elapsedTimer);
+                if (pollTimer) clearInterval(pollTimer);
                 alert('Error: ' + err.message);
                 showView('landing');
                 newBtn.innerHTML = origHTML;
@@ -1747,26 +1741,43 @@
             const fd = new FormData();
             fd.append('csv_file', file);
 
-            // Proses sekarang sinkron di server — tampilkan penghitung waktu berjalan
-            // sebagai indikator kosmetik (bukan persentase progres nyata).
-            const startedAt = Date.now();
-            const elapsedTimer = setInterval(() => {
-                if (lCounter) lCounter.textContent = Math.floor((Date.now() - startedAt) / 1000) + 's';
-            }, 250);
+            let pollTimer = null;
 
             try {
-                const res  = await fetch('/api/batch', { method: 'POST', body: fd });
-                clearInterval(elapsedTimer);
-                const resData = await res.json();
-                if (!res.ok) throw new Error(resData.error || 'Gagal memproses CSV');
+                const queueRes  = await fetch('/api/batch', { method: 'POST', body: fd });
+                const queueData = await queueRes.json();
+                if (!queueRes.ok) throw new Error(queueData.error || 'Gagal memulai proses CSV');
 
-                if (lCounter) lCounter.textContent = '100';
+                const resData = await new Promise((resolve, reject) => {
+                    pollTimer = setInterval(async () => {
+                        try {
+                            const statusRes = await fetch(`/api/batch/status/${queueData.job_id}`);
+                            const statusData = await statusRes.json();
+                            if (!statusRes.ok) throw new Error(statusData.error || 'Job tidak ditemukan');
+
+                            if (lCounter) lCounter.textContent = String(statusData.percent ?? 0);
+                            if (lStatus && statusData.message) lStatus.textContent = statusData.message;
+
+                            if (statusData.status === 'done') {
+                                clearInterval(pollTimer);
+                                resolve(statusData.result);
+                            } else if (statusData.status === 'error') {
+                                clearInterval(pollTimer);
+                                reject(new Error(statusData.error || 'Gagal memproses CSV'));
+                            }
+                        } catch (pollErr) {
+                            clearInterval(pollTimer);
+                            reject(pollErr);
+                        }
+                    }, 700);
+                });
+
                 _csvContent = resData.csv_content || '';
                 if (resData.req_id) localStorage.setItem('sentimens_batch_req_id', resData.req_id);
                 renderBatchResults(resData, file.name);
                 showView('batch-results');
             } catch (err) {
-                clearInterval(elapsedTimer);
+                if (pollTimer) clearInterval(pollTimer);
                 alert('Error: ' + err.message);
                 showView('batch');
                 return;

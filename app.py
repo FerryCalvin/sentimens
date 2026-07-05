@@ -5,6 +5,7 @@
 import json
 import logging
 import os
+import threading
 
 import pandas as pd
 from flask import (
@@ -25,6 +26,7 @@ from config import (
 )
 from preprocessing import preprocess_text
 from inference import load_model, predict_sentiment, predict_batch
+import job_store
 from utils import (
     sanitize_input,
     validate_csv,
@@ -154,9 +156,25 @@ def _load_batch_results_payload(req_id: str) -> dict | None:
     }
 
 
+def _run_batch_job(job_id: str, raw_texts: list) -> None:
+    """Dijalankan di background thread — update job_store di tiap tahap."""
+    from pipeline import run_batch_pipeline
+
+    def progress_cb(stage, percent, message=""):
+        job_store.update_job(job_id, status="running", stage=stage, percent=percent, message=message)
+
+    try:
+        pipeline_result = run_batch_pipeline(raw_texts, req_id=job_id, progress_cb=progress_cb)
+        payload = _load_batch_results_payload(pipeline_result["req_id"])
+        job_store.update_job(job_id, status="done", stage="done", percent=100, message="Selesai", result=payload)
+    except Exception as e:
+        logger.error(f"/api/batch job error: {e}", exc_info=True)
+        job_store.update_job(job_id, status="error", error="Terjadi kesalahan saat memproses CSV.")
+
+
 @app.route("/api/batch", methods=["POST"])
 def api_batch():
-    """JSON endpoint batch CSV — memproses secara sinkron dan langsung mengembalikan hasil."""
+    """JSON endpoint batch CSV — memproses di background thread, kembalikan job_id untuk polling."""
     if not MODEL_LOADED:
         return jsonify({"error": "Model belum dimuat."}), 503
 
@@ -169,15 +187,18 @@ def api_batch():
     if text_col is None:
         return jsonify({"error": "Tidak dapat mendeteksi kolom teks."}), 400
 
-    try:
-        raw_texts = df[text_col].fillna("").tolist()
-        from pipeline import run_batch_pipeline
-        pipeline_result = run_batch_pipeline(raw_texts)
-        payload = _load_batch_results_payload(pipeline_result["req_id"])
-        return jsonify(payload)
-    except Exception as e:
-        logger.error(f"/api/batch error: {e}", exc_info=True)
-        return jsonify({"error": "Terjadi kesalahan saat memproses CSV."}), 500
+    raw_texts = df[text_col].fillna("").tolist()
+    job_id = job_store.create_job()
+    threading.Thread(target=_run_batch_job, args=(job_id, raw_texts), daemon=True).start()
+    return jsonify({"job_id": job_id, "status": "queued"}), 202
+
+
+@app.route("/api/batch/status/<job_id>", methods=["GET"])
+def api_batch_status(job_id):
+    job = job_store.get_job(sanitize_input(str(job_id)))
+    if job is None:
+        return jsonify({"error": "Job not found."}), 404
+    return jsonify(job)
 
 
 @app.route("/api/batch/results/<req_id>", methods=["GET"])
@@ -236,9 +257,29 @@ def _build_results_payload(req_id: str, days: int | None = None) -> dict:
     }
 
 
+def _run_scrape_job(job_id: str, keyword: str, limit: int, sources: list, mode: str, days_back: int) -> None:
+    """Dijalankan di background thread — update job_store di tiap tahap."""
+    from pipeline import run_scrape_pipeline
+
+    def progress_cb(stage, percent, message=""):
+        job_store.update_job(job_id, status="running", stage=stage, percent=percent, message=message)
+
+    try:
+        pipeline_result = run_scrape_pipeline(
+            keyword, limit, sources, mode=mode, days_back=days_back,
+            req_id=job_id, progress_cb=progress_cb,
+        )
+        payload = _build_results_payload(pipeline_result["req_id"])
+        payload["keyword"] = pipeline_result["keyword"]
+        job_store.update_job(job_id, status="done", stage="done", percent=100, message="Selesai", result=payload)
+    except Exception as e:
+        logger.error(f"/api/scrape pipeline error: {e}", exc_info=True)
+        job_store.update_job(job_id, status="error", error="Terjadi kesalahan saat memulai scraping.")
+
+
 @app.route("/api/scrape", methods=["POST"])
 def api_scrape():
-    """JSON endpoint live scraping — memproses secara sinkron dan langsung mengembalikan hasil."""
+    """JSON endpoint live scraping — memproses di background thread, kembalikan job_id untuk polling."""
     if not MODEL_LOADED:
         return jsonify({"error": "Model belum dimuat."}), 503
 
@@ -254,7 +295,7 @@ def api_scrape():
     except (ValueError, TypeError):
         limit = DEFAULT_SCRAPE_LIMIT
 
-    sources = body.get("sources", ["twitter", "web", "threads"])
+    sources = ["twitter", "web", "threads"]  # selalu scrape semua sumber
     mode = body.get("mode", "live")
     try:
         days_back = int(body.get("days_back", DEFAULT_DAYS_BACK))
@@ -262,16 +303,19 @@ def api_scrape():
     except (ValueError, TypeError):
         days_back = DEFAULT_DAYS_BACK
 
-    # Pipeline punya fallback in-process jika scraper eksternal tidak tersedia
-    from pipeline import run_scrape_pipeline
-    try:
-        pipeline_result = run_scrape_pipeline(keyword, limit, sources, mode=mode, days_back=days_back)
-        payload = _build_results_payload(pipeline_result["req_id"])
-        payload["keyword"] = pipeline_result["keyword"]
-        return jsonify(payload)
-    except Exception as e:
-        logger.error(f"/api/scrape pipeline error: {e}", exc_info=True)
-        return jsonify({"error": "Terjadi kesalahan saat memulai scraping."}), 500
+    job_id = job_store.create_job()
+    threading.Thread(
+        target=_run_scrape_job, args=(job_id, keyword, limit, sources, mode, days_back), daemon=True
+    ).start()
+    return jsonify({"job_id": job_id, "status": "queued"}), 202
+
+
+@app.route("/api/scrape/status/<job_id>", methods=["GET"])
+def api_scrape_status(job_id):
+    job = job_store.get_job(sanitize_input(str(job_id)))
+    if job is None:
+        return jsonify({"error": "Job not found."}), 404
+    return jsonify(job)
 
 
 # =============================================================
