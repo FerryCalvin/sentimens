@@ -71,10 +71,6 @@ We use `pandas.read_csv` with strict `dtype` definitions (`CSV_DTYPES`), selecti
 ## Environment Variables (`.env`)
 
 ```
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=yourmail@gmail.com
-SMTP_PASS=your_app_password
 BASE_URL=http://localhost:5000
-SCRAPER_URL=http://localhost:8000
+FASTAPI_URL=http://localhost:8000
 ```

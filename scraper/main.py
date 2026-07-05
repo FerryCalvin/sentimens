@@ -40,15 +40,16 @@ def run_async(coro):
         loop.close()
 
 
-async def _scrape_parallel(keyword: str, twitter_limit: int, web_limit: int, sources: list, days_back: int = 7) -> dict:
+async def _scrape_parallel(keyword: str, twitter_limit: int, web_limit: int, threads_limit: int, sources: list, days_back: int = 7) -> dict:
     """
-    Jalankan Twitter + web search secara PARALEL menggunakan asyncio.gather.
+    Jalankan Twitter + Web search + Threads secara PARALEL menggunakan asyncio.gather.
 
-    Twitter adalah sumber utama — mendapat jatah penuh (twitter_limit).
+    Twitter dan Threads adalah sumber utama — masing-masing mendapat jatah penuh.
     Web search berjalan bersamaan sebagai enrichment (web_limit).
     """
     from twitter import scrape_twitter
     from web_search import scrape_web_search
+    from threads import scrape_threads
 
     tasks = []
     labels = []
@@ -61,13 +62,17 @@ async def _scrape_parallel(keyword: str, twitter_limit: int, web_limit: int, sou
         tasks.append(scrape_web_search(keyword, web_limit, days_back=days_back))
         labels.append("web")
 
+    if "threads" in sources:
+        tasks.append(scrape_threads(keyword, threads_limit, days_back=days_back))
+        labels.append("threads")
+
     if not tasks:
-        return {"twitter": [], "web": []}
+        return {"twitter": [], "web": [], "threads": []}
 
     # Jalankan semua task bersamaan
     results_list = await asyncio.gather(*tasks, return_exceptions=True)
 
-    output = {"twitter": [], "web": []}
+    output = {"twitter": [], "web": [], "threads": []}
     for label, result in zip(labels, results_list):
         if isinstance(result, Exception):
             logger.error(f"Error scraping {label}: {result}")
@@ -107,7 +112,7 @@ def health():
 
     return jsonify({
         "status": "ok",
-        "scrapers": ["twitter", "web"],
+        "scrapers": ["twitter", "web", "threads"],
         "twitter_auth": tw_status,
     })
 
@@ -129,7 +134,7 @@ def scrape():
 
         keyword   = data.get("keyword", "").strip()
         limit     = int(data.get("limit",     _DEFAULT_LIMIT))
-        sources   = data.get("sources", ["twitter", "web"])
+        sources   = data.get("sources", ["twitter", "web", "threads"])
         days_back = int(data.get("days_back", _DEFAULT_DAYS_BACK))
 
         if not keyword:
@@ -139,15 +144,17 @@ def scrape():
         days_back = max(1, min(days_back, 30))
 
         # ── Bagi jatah ─────────────────────────────────────────────────
-        # Twitter mendapat 100% dari limit sebagai sumber utama.
-        # Web search berjalan paralel dan memberikan enrichment
+        # Twitter dan Threads adalah sumber utama, masing-masing dapat 100%
+        # dari limit. Web search berjalan paralel sebagai enrichment
         # (hasilnya digabung, lalu dipotong ke limit).
         twitter_limit = limit                       # sumber utama: dapat semua
+        threads_limit = limit                       # sumber utama: dapat semua
         web_limit     = max(20, limit // 3)         # enrichment: ~1/3 dari limit
 
         logger.info(
             f"Scraping paralel | keyword='{keyword}' | "
-            f"target={limit} | twitter={twitter_limit} | web={web_limit} | days_back={days_back}"
+            f"target={limit} | twitter={twitter_limit} | web={web_limit} | "
+            f"threads={threads_limit} | days_back={days_back}"
         )
 
         # LLM-based query expansion — expands keyword with synonyms/slang before scraping.
@@ -156,15 +163,16 @@ def scrape():
         expanded_keyword = expand_query(keyword)
 
         # Jalankan paralel
-        scraped = run_async(_scrape_parallel(expanded_keyword, twitter_limit, web_limit, sources, days_back=days_back))
+        scraped = run_async(_scrape_parallel(expanded_keyword, twitter_limit, web_limit, threads_limit, sources, days_back=days_back))
 
         twitter_results = scraped.get("twitter", [])
         web_results     = scraped.get("web", [])
+        threads_results = scraped.get("threads", [])
 
-        # ── Gabungkan: Twitter dulu, web sebagai pelengkap ──────────────
-        combined = list(twitter_results)
+        # ── Gabungkan: Twitter + Threads dulu, web sebagai pelengkap ────
+        combined = list(twitter_results) + list(threads_results)
 
-        # Tambahkan web hanya jika Twitter kurang dari limit
+        # Tambahkan web hanya jika sumber utama kurang dari limit
         existing_texts = {r.get("raw_text", "")[:80] for r in combined}
         for item in web_results:
             if len(combined) >= limit:
@@ -174,9 +182,11 @@ def scrape():
                 existing_texts.add(key)
                 combined.append(item)
 
+        combined = combined[:limit]
+
         logger.info(
             f"Total gabungan: {len(combined)} "
-            f"(Twitter: {len(twitter_results)}, Web: {len(web_results)})"
+            f"(Twitter: {len(twitter_results)}, Web: {len(web_results)}, Threads: {len(threads_results)})"
         )
 
         return jsonify({
@@ -186,6 +196,7 @@ def scrape():
             "total_results": len(combined),
             "twitter_count": len(twitter_results),
             "web_count":     len(web_results),
+            "threads_count": len(threads_results),
             "data":          combined,
         })
 

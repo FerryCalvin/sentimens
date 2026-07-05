@@ -3,15 +3,13 @@
 # ============================================================
 import io
 import csv
-import json
 import logging
-from datetime import datetime
 from collections import Counter, OrderedDict
 
 import pandas as pd
 from markupsafe import escape
 
-from config import CSV_OUTPUT_COLUMNS, LABEL_COLORS
+from config import CSV_OUTPUT_COLUMNS
 
 # LRU cache with a hard cap — evicts the oldest entry when full
 _CACHE_MAX_SIZE = 50
@@ -166,6 +164,11 @@ def load_results_from_csv(file_path: str) -> list[dict]:
             "confidence_negatif": "confidence_negative",
             "confidence_netral": "confidence_neutral",
         })
+        # "predicted_label" is read as category dtype (CSV_DTYPES) — a category column
+        # can't be filled with a value outside its observed categories (e.g. a small
+        # batch with no "Netral" rows), so widen it before fillna.
+        if "predicted_label" in df.columns:
+            df["predicted_label"] = df["predicted_label"].astype(object)
         # Replace NaN/None values to ensure valid JSON serialization (no NaNs inside list of dicts)
         df = df.fillna({
             "raw_text": "",
@@ -243,100 +246,6 @@ def calculate_summary(results: list[dict]) -> dict:
         "negatif_pct": round((negatif / total * 100) if total > 0 else 0, 1),
         "netral_pct": round((netral / total * 100) if total > 0 else 0, 1),
         "invalid": invalid_count,
-    }
-
-
-def prepare_chart_data(results: list[dict]) -> dict:
-    """
-    Siapkan data untuk Chart.js (line chart dan pie chart).
-    
-    Returns:
-        dict dengan data untuk setiap tipe grafik
-    """
-    # Pie chart data (FR-VZ-02)
-    summary = calculate_summary(results)
-    pie_data = {
-        "labels": ["Positif", "Negatif", "Netral"],
-        "data": [summary["positif"], summary["negatif"], summary["netral"]],
-        "colors": [
-            LABEL_COLORS["Positif"],
-            LABEL_COLORS["Negatif"],
-            LABEL_COLORS["Netral"],
-        ],
-    }
-    
-    # Line chart data — distribusi berdasarkan urutan waktu/index (FR-VZ-01)
-    # Kelompokkan berdasarkan tanggal jika tersedia, atau per-10 data
-    line_data = _prepare_line_chart_data(results)
-    
-    return {
-        "pie": pie_data,
-        "line": line_data,
-        "summary": summary,
-    }
-
-
-def _prepare_line_chart_data(results: list[dict]) -> dict:
-    """
-    Siapkan data line chart: distribusi sentimen berdasarkan waktu atau index.
-    """
-    if not results:
-        return {"labels": [], "positif": [], "negatif": [], "netral": []}
-    
-    # Cek apakah ada data tanggal
-    has_dates = any(r.get("date") for r in results)
-    
-    if has_dates:
-        # Kelompokkan berdasarkan tanggal (hari)
-        from collections import defaultdict
-        date_groups: dict[str, list] = defaultdict(list)
-        
-        for r in results:
-            date_str = r.get("date", "")
-            try:
-                # Parse ISO 8601 date
-                if date_str:
-                    dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-                    key = dt.strftime("%d/%m")
-                else:
-                    key = "Tidak Diketahui"
-            except (ValueError, AttributeError):
-                key = date_str[:10] if date_str else "Tidak Diketahui"
-            
-            date_groups[key].append(r.get("predicted_label", "Netral"))
-        
-        labels = sorted(date_groups.keys())
-        positif_counts = []
-        negatif_counts = []
-        netral_counts = []
-        
-        for lbl in labels:
-            items = date_groups[lbl]
-            positif_counts.append(items.count("Positif"))
-            negatif_counts.append(items.count("Negatif"))
-            netral_counts.append(items.count("Netral"))
-        
-    else:
-        # Tidak ada tanggal: kelompokkan per-10 item
-        chunk_size = max(1, len(results) // 10) if len(results) > 10 else 1
-        labels = []
-        positif_counts = []
-        negatif_counts = []
-        netral_counts = []
-        
-        for i in range(0, len(results), chunk_size):
-            chunk = results[i : i + chunk_size]
-            chunk_labels = [r.get("predicted_label", "Netral") for r in chunk]
-            labels.append(f"Data {i+1}–{min(i+chunk_size, len(results))}")
-            positif_counts.append(chunk_labels.count("Positif"))
-            negatif_counts.append(chunk_labels.count("Negatif"))
-            netral_counts.append(chunk_labels.count("Netral"))
-    
-    return {
-        "labels": labels,
-        "positif": positif_counts,
-        "negatif": negatif_counts,
-        "netral": netral_counts,
     }
 
 
@@ -504,6 +413,23 @@ def get_timeline_data(df: pd.DataFrame) -> list:
         return []
 
 
+def compute_confidence_avg(df: pd.DataFrame) -> dict:
+    """Rata-rata confidence per kelas (dalam persen). Dipakai oleh JSON API dan export laporan."""
+    def safe_mean_pct(series):
+        if series.empty:
+            return 0.0
+        val = series.mean()
+        if pd.isna(val):
+            return 0.0
+        return round(float(val) * 100, 1)
+
+    return {
+        "positive": safe_mean_pct(df["confidence_positif"]) if "confidence_positif" in df.columns else 0.0,
+        "neutral":  safe_mean_pct(df["confidence_netral"])  if "confidence_netral"  in df.columns else 0.0,
+        "negative": safe_mean_pct(df["confidence_negatif"]) if "confidence_negatif" in df.columns else 0.0,
+    }
+
+
 def get_top_items(df: pd.DataFrame, n: int = 100) -> list:
     if df.empty:
         return []
@@ -576,14 +502,3 @@ def compute_evaluation_metrics(true_labels: list, pred_labels: list) -> dict:
         },
         "confusion_matrix": cm.tolist(),
     }
-
-def send_notification(email: str, topic: str, request_id: str, item_count: int):
-    """FR-EM-01: Send email notification."""
-    if not email:
-        return
-    logger.info(f"Mengirim notifikasi email ke {email} untuk topik '{topic}' ({item_count} item).")
-    try:
-        # Mocking real SMTP to avoid crashing without credentials
-        logger.info(f"SIMULATED EMAIL SENT TO {email} for topic {topic}!")
-    except Exception as e:
-        logger.error(f"Gagal mengirim email: {e}")

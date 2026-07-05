@@ -419,6 +419,11 @@
 <div class="relative w-full">
 <input class="glass-input w-full bg-surface-bright/5 backdrop-blur-xl border border-on-surface/10 rounded px-4 py-3 font-mono-code text-mono-code text-on-surface placeholder-terminal-placeholder transition-all duration-300" id="topic-input" placeholder="Enter a topic..." type="text"/>
 </div>
+<div class="flex items-center justify-center gap-4 text-sm text-on-surface-variant" id="source-checkboxes">
+<label class="flex items-center gap-1.5 cursor-pointer hover:text-on-surface transition-colors"><input type="checkbox" id="source-twitter" class="accent-primary" checked> Twitter/X</label>
+<label class="flex items-center gap-1.5 cursor-pointer hover:text-on-surface transition-colors"><input type="checkbox" id="source-web" class="accent-primary" checked> Web/News</label>
+<label class="flex items-center gap-1.5 cursor-pointer hover:text-on-surface transition-colors"><input type="checkbox" id="source-threads" class="accent-primary" checked> Threads</label>
+</div>
 <button class="w-full bg-on-surface text-surface-dim font-label-caps text-label-caps uppercase py-3 px-6 rounded hover:opacity-90 active:scale-95 transition-all duration-200 flex items-center justify-center gap-2" id="analyze-btn">
                     Analyze
                     <span class="material-symbols-outlined text-[16px]">arrow_forward</span>
@@ -436,6 +441,14 @@
 <p class="text-on-surface-variant font-mono-code text-mono-code mt-2" id="analysis-status">Processing complete: 10,492 entities analyzed.</p>
 </div>
 <div class="flex items-center gap-4 mt-4 md:mt-0">
+<button class="text-on-surface-variant hover:text-primary transition-colors flex items-center gap-2 text-sm" id="export-xlsx-btn" title="Export Excel">
+<span class="material-symbols-outlined text-[16px]">description</span>
+                    Excel
+                </button>
+<button class="text-on-surface-variant hover:text-primary transition-colors flex items-center gap-2 text-sm" id="export-pdf-btn" title="Export PDF">
+<span class="material-symbols-outlined text-[16px]">picture_as_pdf</span>
+                    PDF
+                </button>
 <button class="text-on-surface-variant hover:text-primary transition-colors flex items-center gap-2 text-sm hidden" id="toggle-view-btn">
 <span class="material-symbols-outlined text-[16px]">dataset</span>
                     View Full Dataset
@@ -560,6 +573,9 @@
 <p id="csv-drop-label" class="font-label-caps text-label-caps uppercase text-on-surface-variant">Drag and drop CSV files here</p>
 <p class="text-sm text-on-surface/50 mt-2">or click to browse</p>
 </div>
+<button id="batch-reload-btn" class="hidden items-center gap-2 text-sm text-on-surface-variant hover:text-primary transition-colors">
+<span class="material-symbols-outlined text-[16px]">history</span> Muat Hasil Batch Sebelumnya
+</button>
 </div>
 <!-- Batch Result View -->
 <div class="analysis-view flex-col w-full max-w-container-max mx-auto gap-6 mt-8 ui-element" id="batch-result-view">
@@ -569,6 +585,12 @@
             <p id="batch-result-status" class="text-on-surface-variant text-sm mt-1">—</p>
         </div>
         <div class="flex gap-3 mt-4 md:mt-0 flex-wrap">
+            <button id="batch-export-xlsx-btn" class="flex items-center gap-2 px-5 py-2 rounded-lg border border-outline-variant text-on-surface-variant text-sm hover:bg-on-surface/5 transition-colors">
+                <span class="material-symbols-outlined text-[16px]">description</span> Export Excel
+            </button>
+            <button id="batch-export-pdf-btn" class="flex items-center gap-2 px-5 py-2 rounded-lg border border-outline-variant text-on-surface-variant text-sm hover:bg-on-surface/5 transition-colors">
+                <span class="material-symbols-outlined text-[16px]">picture_as_pdf</span> Export PDF
+            </button>
             <button id="batch-download-btn" class="flex items-center gap-2 px-5 py-2 rounded-lg bg-primary text-on-primary font-semibold text-sm hover:opacity-90 transition-opacity">
                 <span class="material-symbols-outlined text-[16px]">download</span> Download CSV
             </button>
@@ -1273,6 +1295,18 @@
         const newBtn = _analyzeBtn.cloneNode(true);
         _analyzeBtn.parentNode.replaceChild(newBtn, _analyzeBtn);
 
+        function getSelectedSources() {
+            const boxes = [
+                ['twitter', 'source-twitter'],
+                ['web',     'source-web'],
+                ['threads', 'source-threads'],
+            ];
+            const selected = boxes
+                .filter(([, id]) => { const el = document.getElementById(id); return !el || el.checked; })
+                .map(([name]) => name);
+            return selected.length ? selected : ['twitter', 'web', 'threads'];
+        }
+
         newBtn.addEventListener('click', async () => {
             const text = _topicInput.value.trim();
             if (!text) return;
@@ -1282,182 +1316,80 @@
             newBtn.innerHTML = 'Analyzing... <span class="material-symbols-outlined text-[16px]" style="animation:spin 1s linear infinite;display:inline-block">refresh</span>';
             newBtn.disabled = true;
 
+            const lStatusTxt = document.getElementById('loading-status-text');
+            const lCounterVal = document.getElementById('loading-counter-val');
+            let elapsedTimer = null;
+
             try {
                 const limit    = (window.APP_CONFIG && window.APP_CONFIG.limit)    || 200;
                 const daysBack = (window.APP_CONFIG && window.APP_CONFIG.daysBack) || 7;
-                const mode = isPrecomputedView ? "demo" : "live";
+                const sources  = getSelectedSources();
+
+                if (_analysisStatus) _analysisStatus.textContent = 'Mengambil dan menganalisis data...';
+                if (_analysisTitle)  _analysisTitle.textContent  = `Analysis: ${text}`;
+                if (lStatusTxt) lStatusTxt.textContent = 'MEMPROSES';
+                showView('loading');
+
+                // Proses sekarang sinkron di server — tampilkan penghitung waktu berjalan
+                // sebagai indikator kosmetik (bukan persentase progres nyata).
+                const startedAt = Date.now();
+                elapsedTimer = setInterval(() => {
+                    if (lCounterVal) lCounterVal.textContent = Math.floor((Date.now() - startedAt) / 1000) + 's';
+                }, 250);
+
                 const res  = await fetch('/api/scrape', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ keyword: text, limit: limit, days_back: daysBack, sources: ['twitter', 'web'], mode: "live" })
+                    body: JSON.stringify({ keyword: text, limit: limit, days_back: daysBack, sources: sources, mode: "live" })
                 });
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.error || 'Gagal memulai analisis');
+                clearInterval(elapsedTimer);
+                const finalData = await res.json();
+                if (!res.ok) throw new Error(finalData.error || 'Gagal memproses analisis');
 
-                const reqId = data.req_id;
-                if (_analysisStatus) _analysisStatus.textContent = 'Memulai proses scraping...';
-                if (_analysisTitle)  _analysisTitle.textContent  = `Analysis: ${text}`;
-                showView('loading');
-                
-                // Polling logic
-                const POLL_INTERVAL_MS = 2000;
-                const STALL_TIMEOUT_MS = 300_000; // 5 min without progress = truly stuck
-                const MAX_RETRIES      = 5;
-                const PER_REQ_TIMEOUT  = 30_000;  // 30 s per individual fetch
+                if (lCounterVal) lCounterVal.textContent = '100';
 
-                let fetchFailCount = 0;
-                let _displayedProgress = 0;
-                let _smoothTimer = null;
-                let _lastProgressAt = Date.now(); // reset each time progress increases
-
-                function startSmoothProgress(serverProgress, status) {
-                    if (_smoothTimer) clearInterval(_smoothTimer);
-                    const targets = { SCRAPING: 45, INFERENCING: 90, FINALIZING: 98 };
-                    const target = Math.max(targets[status] || serverProgress, serverProgress);
-                    _smoothTimer = setInterval(() => {
-                        const lCounterVal = document.getElementById('loading-counter-val');
-                        if (_displayedProgress < target) {
-                            _displayedProgress = Math.min(_displayedProgress + 0.4, target);
-                            if (lCounterVal) lCounterVal.textContent = Math.round(_displayedProgress);
-                        } else {
-                            clearInterval(_smoothTimer);
-                        }
-                    }, 150);
+                if (finalData.total_results === 0) {
+                    if (_analysisTitle)  _analysisTitle.textContent  = `Analysis: ${text}`;
+                    if (_analysisStatus) _analysisStatus.textContent = 'No data found for the given keyword.';
+                    newBtn.innerHTML = origHTML;
+                    newBtn.disabled  = false;
+                    showView('landing');
+                    alert('No data found for the given keyword.');
+                    return;
                 }
 
-                const doPoll = async () => {
-                    if (Date.now() - _lastProgressAt > STALL_TIMEOUT_MS) {
-                        if (_smoothTimer) clearInterval(_smoothTimer);
-                        const lStatusTxt = document.getElementById('loading-status-text');
-                        if (lStatusTxt) lStatusTxt.textContent = 'PROSES TERHENTI — COBA LAGI';
-                        if (_analysisStatus) _analysisStatus.textContent = 'Proses berhenti tanpa kemajuan selama 5 menit.';
-                        newBtn.innerHTML = origHTML;
-                        newBtn.disabled  = false;
-                        showView('landing');
-                        alert('Proses berhenti tanpa kemajuan selama 5 menit. Silakan coba lagi.');
-                        return;
-                    }
-
-                    const controller = new AbortController();
-                    const tid = setTimeout(() => controller.abort(), PER_REQ_TIMEOUT);
-
-                    try {
-                        const statusRes  = await fetch(`/api/status/${reqId}`, { signal: controller.signal });
-                        clearTimeout(tid);
-                        fetchFailCount = 0; // reset on success
-
-                        const statusData = await statusRes.json();
-                        if (_analysisStatus)
-                            _analysisStatus.textContent = `Processing: ${statusData.message || statusData.status} (${statusData.progress || 0}%)`;
-
-                        // Update Loading View elements
-                        const lStatusTxt = document.getElementById('loading-status-text');
-                        const lCounterVal = document.getElementById('loading-counter-val');
-                        if (lStatusTxt) lStatusTxt.textContent = (statusData.message || statusData.status || 'PROCESSING').toUpperCase();
-                        const serverProg = Math.round(statusData.progress || 0);
-                        if (serverProg > _displayedProgress) {
-                            _lastProgressAt = Date.now(); // pipeline masih bergerak — reset stall clock
-                            _displayedProgress = serverProg;
-                        }
-                        if (lCounterVal) lCounterVal.textContent = Math.round(_displayedProgress);
-                        startSmoothProgress(serverProg, statusData.status || '');
-
-                        // Module highlighting
-                        const state = statusData.status || '';
-                        const mod1 = document.getElementById('module-token');
-                        const mod2 = document.getElementById('module-entity');
-                        const mod3 = document.getElementById('module-vector');
-                        if (mod1) mod1.className = (state === 'SCRAPING') ? 'module-item opacity-100' : 'module-item opacity-40';
-                        if (mod2) mod2.className = (state === 'PROCESSING') ? 'module-item opacity-100' : 'module-item opacity-40';
-                        if (mod3) mod3.className = (state === 'FINALIZING' || state === 'COMPLETED') ? 'module-item opacity-100' : 'module-item opacity-40';
-
-                        if (statusData.status === 'COMPLETED') {
-                            if (_smoothTimer) clearInterval(_smoothTimer);
-                            if (lCounterVal) lCounterVal.textContent = '100';
-                            if (statusData.total_results === 0) {
-                                if (_analysisTitle)  _analysisTitle.textContent  = `Analysis: ${text}`;
-                                if (_analysisStatus) _analysisStatus.textContent = 'No data found for the given keyword.';
-                                newBtn.innerHTML = origHTML;
-                                newBtn.disabled  = false;
-                                showView('landing');
-                                alert('No data found for the given keyword.');
-                                return;
-                            }
-                            fetch(`/api/results/${reqId}`)
-                                .then(r => r.json())
-                                .then(finalData => {
-                                    if (_analysisTitle)  _analysisTitle.textContent  = `Analysis: ${text}`;
-                                    if (_analysisStatus) _analysisStatus.textContent =
-                                        `Done - Total: ${statusData.total_results} data - Time: ${new Date().toLocaleTimeString()}`;
-                                    const badge = document.getElementById('demo-badge');
-                                    if (badge) badge.classList.add('hidden');
-                                    const toggleBtn = document.getElementById('toggle-view-btn');
-                                    if (toggleBtn) {
-                                        toggleBtn.classList.remove('hidden');
-                                        toggleBtn.innerHTML = '<span class="material-symbols-outlined text-[16px]">dataset</span> View Full Dataset';
-                                    }
-                                    isPrecomputedView = false;
-                                    const mappedData = {
-                                        summary: {
-                                            total:          finalData.summary?.total          ?? finalData.distribution?.total    ?? 0,
-                                            positive_count: finalData.summary?.positive_count ?? finalData.distribution?.positive ?? 0,
-                                            neutral_count:  finalData.summary?.neutral_count  ?? finalData.distribution?.neutral  ?? 0,
-                                            negative_count: finalData.summary?.negative_count ?? finalData.distribution?.negative ?? 0,
-                                        },
-                                        timeline:       finalData.timeline       || [],
-                                        word_freq:      finalData.word_freq      || [],
-                                        confidence_avg: finalData.confidence_avg || { positive: 0, neutral: 0, negative: 0 },
-                                        model_metrics:  finalData.model_metrics  || {},
-                                        results:        finalData.top_items      || [],
-                                    };
-                                    currentAnalysisReqId = reqId;
-                                    showView('analysis');
-                                    initChartsWithData(mappedData);
-                                    newBtn.innerHTML = origHTML;
-                                    newBtn.disabled  = false;
-                                })
-                                .catch(e => {
-                                    console.error('Gagal memuat hasil akhir', e);
-                                    if (_analysisStatus) _analysisStatus.textContent = 'Error memuat hasil akhir';
-                                    newBtn.innerHTML = origHTML;
-                                    newBtn.disabled  = false;
-                                    showView('landing');
-                                });
-                            return; // do not schedule next poll
-                        }
-
-                        if (statusData.status === 'FAILED' || statusData.status === 'NOT_FOUND') {
-                            if (_smoothTimer) clearInterval(_smoothTimer);
-                            if (_analysisStatus) _analysisStatus.textContent = 'Error: ' + (statusData.message || 'Proses gagal');
-                            newBtn.innerHTML = origHTML;
-                            newBtn.disabled  = false;
-                            showView('landing');
-                            alert('Proses gagal: ' + (statusData.message || 'Error'));
-                            return;
-                        }
-
-                    } catch (pollErr) {
-                        clearTimeout(tid);
-                        fetchFailCount++;
-                        if (fetchFailCount >= MAX_RETRIES) {
-                            if (_analysisStatus) _analysisStatus.textContent = 'Error saat mengecek status: ' + pollErr.message;
-                            newBtn.innerHTML = origHTML;
-                            newBtn.disabled  = false;
-                            showView('landing');
-                            alert('Error: ' + pollErr.message);
-                            return;
-                        }
-                        // silent retry after 3 s
-                        setTimeout(doPoll, 3000);
-                        return;
-                    }
-
-                    setTimeout(doPoll, POLL_INTERVAL_MS);
+                if (_analysisTitle)  _analysisTitle.textContent  = `Analysis: ${text}`;
+                if (_analysisStatus) _analysisStatus.textContent =
+                    `Done - Total: ${finalData.total_results} data - Time: ${new Date().toLocaleTimeString()}`;
+                const badge = document.getElementById('demo-badge');
+                if (badge) badge.classList.add('hidden');
+                const toggleBtn = document.getElementById('toggle-view-btn');
+                if (toggleBtn) {
+                    toggleBtn.classList.remove('hidden');
+                    toggleBtn.innerHTML = '<span class="material-symbols-outlined text-[16px]">dataset</span> View Full Dataset';
+                }
+                isPrecomputedView = false;
+                const mappedData = {
+                    summary: {
+                        total:          finalData.summary?.total          ?? finalData.distribution?.total    ?? 0,
+                        positive_count: finalData.summary?.positive_count ?? finalData.distribution?.positive ?? 0,
+                        neutral_count:  finalData.summary?.neutral_count  ?? finalData.distribution?.neutral  ?? 0,
+                        negative_count: finalData.summary?.negative_count ?? finalData.distribution?.negative ?? 0,
+                    },
+                    timeline:       finalData.timeline       || [],
+                    word_freq:      finalData.word_freq      || [],
+                    confidence_avg: finalData.confidence_avg || { positive: 0, neutral: 0, negative: 0 },
+                    model_metrics:  finalData.model_metrics  || {},
+                    results:        finalData.top_items      || [],
                 };
-
-                doPoll();
+                currentAnalysisReqId = finalData.req_id;
+                showView('analysis');
+                initChartsWithData(mappedData);
+                newBtn.innerHTML = origHTML;
+                newBtn.disabled  = false;
 
             } catch(err) {
+                if (elapsedTimer) clearInterval(elapsedTimer);
                 alert('Error: ' + err.message);
                 showView('landing');
                 newBtn.innerHTML = origHTML;
@@ -1476,6 +1408,16 @@
     let _chartInstances = {};
     let currentAnalysisReqId = null;
     let activeFilterDays = 'all';
+
+    // --- Export Excel/PDF (Analysis View) ---
+    document.getElementById('export-xlsx-btn')?.addEventListener('click', () => {
+        if (!currentAnalysisReqId) { alert('Tidak ada data untuk diekspor.'); return; }
+        window.location.href = `/api/export/${currentAnalysisReqId}?format=xlsx`;
+    });
+    document.getElementById('export-pdf-btn')?.addEventListener('click', () => {
+        if (!currentAnalysisReqId) { alert('Tidak ada data untuk diekspor.'); return; }
+        window.location.href = `/api/export/${currentAnalysisReqId}?format=pdf`;
+    });
 
     // --- Time Filter ---
     function _setActiveFilterBtn(days) {
@@ -1758,6 +1700,16 @@
     document.head.appendChild(style);
 
     // --- Batch CSV Drag & Drop ---
+    let currentBatchReqId = null;
+    document.getElementById('batch-export-xlsx-btn')?.addEventListener('click', () => {
+        if (!currentBatchReqId) { alert('Tidak ada data untuk diekspor.'); return; }
+        window.location.href = `/api/export/${currentBatchReqId}?format=xlsx`;
+    });
+    document.getElementById('batch-export-pdf-btn')?.addEventListener('click', () => {
+        if (!currentBatchReqId) { alert('Tidak ada data untuk diekspor.'); return; }
+        window.location.href = `/api/export/${currentBatchReqId}?format=pdf`;
+    });
+
     (function() {
         const dropZone  = document.getElementById('csv-drop-zone');
         const fileInput = document.getElementById('csv-file-input');
@@ -1795,112 +1747,59 @@
             const fd = new FormData();
             fd.append('csv_file', file);
 
-            let reqId;
+            // Proses sekarang sinkron di server — tampilkan penghitung waktu berjalan
+            // sebagai indikator kosmetik (bukan persentase progres nyata).
+            const startedAt = Date.now();
+            const elapsedTimer = setInterval(() => {
+                if (lCounter) lCounter.textContent = Math.floor((Date.now() - startedAt) / 1000) + 's';
+            }, 250);
+
             try {
                 const res  = await fetch('/api/batch', { method: 'POST', body: fd });
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.error || 'Gagal memulai pemrosesan CSV');
-                reqId = data.req_id;
+                clearInterval(elapsedTimer);
+                const resData = await res.json();
+                if (!res.ok) throw new Error(resData.error || 'Gagal memproses CSV');
+
+                if (lCounter) lCounter.textContent = '100';
+                _csvContent = resData.csv_content || '';
+                if (resData.req_id) localStorage.setItem('sentimens_batch_req_id', resData.req_id);
+                renderBatchResults(resData, file.name);
+                showView('batch-results');
             } catch (err) {
+                clearInterval(elapsedTimer);
                 alert('Error: ' + err.message);
                 showView('batch');
                 return;
             }
+        }
 
-            // Poll /api/status/<reqId> until COMPLETED or FAILED
-            const POLL_INTERVAL_MS = 2000;
-            const STALL_TIMEOUT_MS = 300_000;
-            const MAX_RETRIES      = 5;
-            const PER_REQ_TIMEOUT  = 30_000;
-
-            let fetchFailCount   = 0;
-            let _displayedProg   = 0;
-            let _smoothTimer     = null;
-            let _lastProgressAt  = Date.now();
-
-            function startSmoothProg(serverProg) {
-                if (_smoothTimer) clearInterval(_smoothTimer);
-                _smoothTimer = setInterval(() => {
-                    if (_displayedProg < serverProg) {
-                        _displayedProg = Math.min(_displayedProg + 0.5, serverProg);
-                        if (lCounter) lCounter.textContent = Math.round(_displayedProg);
-                    } else {
-                        clearInterval(_smoothTimer);
-                    }
-                }, 150);
+        // --- Reload hasil batch sebelumnya (req_id tersimpan di localStorage) ---
+        async function reloadLastBatch() {
+            const reqId = localStorage.getItem('sentimens_batch_req_id');
+            if (!reqId) return;
+            try {
+                const res  = await fetch(`/api/batch/results/${reqId}`);
+                const data = await res.json();
+                if (!res.ok) { localStorage.removeItem('sentimens_batch_req_id'); return; }
+                _csvContent = data.csv_content || '';
+                renderBatchResults(data, 'hasil_sebelumnya.csv');
+                showView('batch-results');
+            } catch (e) {
+                console.error('Gagal memuat ulang hasil batch sebelumnya', e);
             }
+        }
 
-            const doPoll = async () => {
-                if (Date.now() - _lastProgressAt > STALL_TIMEOUT_MS) {
-                    if (_smoothTimer) clearInterval(_smoothTimer);
-                    if (lStatus) lStatus.textContent = 'PROSES TERHENTI — COBA LAGI';
-                    showView('batch');
-                    alert('Proses berhenti tanpa kemajuan selama 5 menit. Silakan coba lagi.');
-                    return;
-                }
-
-                const controller = new AbortController();
-                const tid = setTimeout(() => controller.abort(), PER_REQ_TIMEOUT);
-
-                try {
-                    const statusRes  = await fetch(`/api/status/${reqId}`, { signal: controller.signal });
-                    clearTimeout(tid);
-                    fetchFailCount = 0;
-
-                    const statusData = await statusRes.json();
-                    const serverProg = Math.round(statusData.progress || 0);
-                    if (lStatus)  lStatus.textContent  = (statusData.message || statusData.status || 'PROCESSING').toUpperCase();
-                    if (serverProg > _displayedProg) {
-                        _lastProgressAt = Date.now();
-                        _displayedProg  = serverProg;
-                    }
-                    if (lCounter) lCounter.textContent = Math.round(_displayedProg);
-                    startSmoothProg(serverProg);
-
-                    if (statusData.status === 'COMPLETED') {
-                        if (_smoothTimer) clearInterval(_smoothTimer);
-                        if (lCounter) lCounter.textContent = '100';
-                        try {
-                            const resR  = await fetch(`/api/batch/results/${reqId}`);
-                            const resData = await resR.json();
-                            if (!resR.ok) throw new Error(resData.error || 'Gagal memuat hasil');
-                            _csvContent = resData.csv_content || '';
-                            renderBatchResults(resData, file.name);
-                            showView('batch-results');
-                        } catch (fetchErr) {
-                            alert('Error memuat hasil: ' + fetchErr.message);
-                            showView('batch');
-                        }
-                        return;
-                    }
-
-                    if (statusData.status === 'FAILED' || statusData.status === 'NOT_FOUND') {
-                        if (_smoothTimer) clearInterval(_smoothTimer);
-                        alert('Proses gagal: ' + (statusData.message || 'Error tidak diketahui'));
-                        showView('batch');
-                        return;
-                    }
-
-                } catch (pollErr) {
-                    clearTimeout(tid);
-                    fetchFailCount++;
-                    if (fetchFailCount >= MAX_RETRIES) {
-                        if (_smoothTimer) clearInterval(_smoothTimer);
-                        alert('Error: ' + pollErr.message);
-                        showView('batch');
-                        return;
-                    }
-                    setTimeout(doPoll, 3000);
-                    return;
-                }
-
-                setTimeout(doPoll, POLL_INTERVAL_MS);
-            };
-
-            doPoll();
+        const reloadBtn = document.getElementById('batch-reload-btn');
+        if (reloadBtn) {
+            if (localStorage.getItem('sentimens_batch_req_id')) {
+                reloadBtn.classList.remove('hidden');
+                reloadBtn.style.display = 'inline-flex';
+            }
+            reloadBtn.addEventListener('click', reloadLastBatch);
         }
 
         function renderBatchResults(data, filename) {
+            currentBatchReqId = data.req_id || null;
             const statusEl = document.getElementById('batch-result-status');
             if (statusEl) statusEl.textContent = `${filename} — ${data.total_results} baris diproses`;
 
