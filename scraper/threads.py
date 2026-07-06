@@ -61,31 +61,13 @@ from typing import List
 logger = logging.getLogger(__name__)
 
 COOKIES_FILE = Path(__file__).parent / "threads_cookies_config.json"
+SESSION_FILE = Path(__file__).parent / "threads_session.json"  # dari threads_login.py (manual login)
 DEFAULT_TIMEOUT = 45_000
-
-_CHROME_PATHS = [
-    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-]
-try:
-    import os as _os
-    _CHROME_PATHS.append(
-        rf"C:\Users\{_os.environ.get('USERNAME','User')}\AppData\Local\Google\Chrome\Application\chrome.exe"
-    )
-except Exception:
-    pass
 
 _SJS_SCRIPT_RE = re.compile(
     r'<script type="application/json" data-content-len="\d+" data-sjs="" data-processed="1">(.*?)</script>',
     re.S,
 )
-
-
-def _find_chrome() -> str | None:
-    for p in _CHROME_PATHS:
-        if Path(p).exists():
-            return p
-    return None
 
 
 def _load_cookies() -> dict:
@@ -122,9 +104,17 @@ async def scrape_threads(keyword: str, limit: int, days_back: int = 7) -> List[d
     """
     Entry point utama.
     1. Coba inject cookie dari threads_cookies_config.json (jika ada).
-    2. Fallback: scrape anonim tanpa login (halaman publik threads.com/search).
-    3. Fallback akhir (di dalam masing-masing jalur): web search.
+    2. Fallback: pakai sesi login manual tersimpan (threads_session.json, dari threads_login.py).
+    3. Fallback: scrape anonim tanpa login (halaman publik threads.com/search).
+    4. Fallback akhir (di dalam masing-masing jalur): web search.
     """
+    if days_back and days_back > 7:
+        logger.info(
+            f"[Threads] days_back={days_back} diminta, tapi pencarian Threads tidak punya "
+            "kapabilitas filter tanggal (selalu recency-biased) — parameter diterima demi "
+            "simetri API, tidak berpengaruh. Keterbatasan platform, bukan bug."
+        )
+
     raw_cookies = _load_cookies()
 
     if raw_cookies.get("sessionid"):
@@ -133,71 +123,107 @@ async def scrape_threads(keyword: str, limit: int, days_back: int = 7) -> List[d
         if results:
             logger.info(f"Threads (cookie): {len(results)} post")
             return results
-        logger.warning("Cookie injection Threads gagal (mungkin expired). Coba akses anonim...")
+        logger.warning("Cookie injection Threads gagal (mungkin expired). Coba sesi login manual...")
 
+    if SESSION_FILE.exists() and SESSION_FILE.stat().st_size > 1000:
+        logger.info("Sesi login manual Threads ditemukan — coba pakai sebelum akses anonim.")
+        results = await _scrape_with_session(keyword, limit)
+        if results:
+            logger.info(f"Threads (session): {len(results)} post")
+            return results
+        logger.warning("Sesi login manual Threads gagal (mungkin expired). Coba akses anonim...")
+
+    logger.info(
+        "[Threads] Sesi anonim punya batas keras platform pada resolver pencarian "
+        "(has_next_page:false setelah ~20 hasil) — kesabaran scroll tidak bisa menambah "
+        "yield di jalur ini. Redistribusi kuota ke Twitter/Web adalah perilaku normal, bukan anomali."
+    )
     return await _scrape_anonymous(keyword, limit)
 
 
 async def _scrape_with_cookies(keyword: str, limit: int, raw_cookies: dict) -> List[dict]:
-    """Buka Chrome, inject cookie Threads (sessionid, csrftoken, dst), lalu scrape threads.com/search."""
-    from playwright.async_api import async_playwright
-
-    chrome_path = _find_chrome()
-    if not chrome_path:
-        logger.error("Chrome tidak ditemukan.")
-        return []
+    """Inject cookie Threads (sessionid, csrftoken, dst) ke context dari browser bersama, lalu scrape."""
+    from browser_manager import manager as browser_manager
 
     playwright_cookies = _build_playwright_cookies(raw_cookies)
     search_url = f"https://www.threads.com/search?q={urllib.parse.quote(keyword)}&serp_type=default"
     results: List[dict] = []
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            executable_path=chrome_path,
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-blink-features=AutomationControlled",
-                "--disable-infobars",
-                "--window-size=1280,900",
-                "--disable-dev-shm-usage",
-            ],
-        )
-        try:
-            context = await browser.new_context(
-                viewport={"width": 1280, "height": 900},
-                locale="id-ID",
-                timezone_id="Asia/Jakarta",
-            )
-            await context.add_init_script("""
-                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-                Object.defineProperty(navigator, 'plugins',   { get: () => [1, 2, 3] });
-                window.chrome = { runtime: {}, loadTimes: function(){}, csi: function(){} };
-            """)
+    context = await browser_manager.new_context(
+        viewport={"width": 1280, "height": 900},
+        locale="id-ID",
+        timezone_id="Asia/Jakarta",
+    )
+    try:
+        await context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            Object.defineProperty(navigator, 'plugins',   { get: () => [1, 2, 3] });
+            window.chrome = { runtime: {}, loadTimes: function(){}, csi: function(){} };
+        """)
 
-            await context.add_cookies(playwright_cookies)
-            logger.info(f"Injected {len(playwright_cookies)} cookies Threads ke browser")
+        await context.add_cookies(playwright_cookies)
+        logger.info(f"Injected {len(playwright_cookies)} cookies Threads ke browser")
 
-            page = await context.new_page()
+        page = await context.new_page()
 
-            logger.info(f"Membuka (cookie): {search_url}")
-            await page.goto(search_url, wait_until="domcontentloaded", timeout=DEFAULT_TIMEOUT)
-            await asyncio.sleep(4)
+        logger.info(f"Membuka (cookie): {search_url}")
+        await page.goto(search_url, wait_until="domcontentloaded", timeout=DEFAULT_TIMEOUT)
+        await asyncio.sleep(4)
 
-            cur_url = page.url
-            if any(x in cur_url.lower() for x in ["login", "accounts/login"]):
-                logger.warning(f"Cookie Threads tidak valid — redirect ke {cur_url}")
-                await context.close()
-                return []
+        cur_url = page.url
+        if any(x in cur_url.lower() for x in ["login", "accounts/login"]):
+            logger.warning(f"Cookie Threads tidak valid — redirect ke {cur_url}")
+            return []
 
-            logger.info(f"Cookie Threads valid! URL: {cur_url[:60]}")
-            results = await _collect_posts(page, search_url, limit)
-            await context.close()
+        logger.info(f"Cookie Threads valid! URL: {cur_url[:60]}")
+        results = await _collect_posts(page, search_url, limit)
 
-        except Exception as e:
-            logger.error(f"Error scraping Threads dengan cookies: {e}", exc_info=True)
-        finally:
-            await browser.close()
+    except Exception as e:
+        logger.error(f"Error scraping Threads dengan cookies: {e}", exc_info=True)
+    finally:
+        await context.close()
+
+    return results
+
+
+async def _scrape_with_session(keyword: str, limit: int) -> List[dict]:
+    """Pakai storage_state dari threads_session.json (hasil threads_login.py) untuk context baru, lalu scrape."""
+    from browser_manager import manager as browser_manager
+
+    search_url = f"https://www.threads.com/search?q={urllib.parse.quote(keyword)}&serp_type=default"
+    results: List[dict] = []
+
+    context = await browser_manager.new_context(
+        storage_state=str(SESSION_FILE),
+        viewport={"width": 1280, "height": 900},
+        locale="id-ID",
+        timezone_id="Asia/Jakarta",
+    )
+    try:
+        await context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            Object.defineProperty(navigator, 'plugins',   { get: () => [1, 2, 3] });
+            window.chrome = { runtime: {}, loadTimes: function(){}, csi: function(){} };
+        """)
+
+        page = await context.new_page()
+
+        logger.info(f"Membuka (session): {search_url}")
+        await page.goto(search_url, wait_until="domcontentloaded", timeout=DEFAULT_TIMEOUT)
+        await asyncio.sleep(4)
+
+        cur_url = page.url
+        if any(x in cur_url.lower() for x in ["login", "accounts/login"]):
+            logger.warning(f"Sesi Threads tidak valid — redirect ke {cur_url}")
+            return []
+
+        logger.info(f"Sesi Threads valid! URL: {cur_url[:60]}")
+        results = await _collect_posts(page, search_url, limit)
+
+    except Exception as e:
+        logger.error(f"Error scraping Threads dengan sesi login: {e}", exc_info=True)
+    finally:
+        await context.close()
 
     return results
 
@@ -207,59 +233,43 @@ async def _scrape_anonymous(keyword: str, limit: int) -> List[dict]:
     Scrape tanpa login: halaman publik threads.com/search. Jika terdeteksi
     login-wall, fallback ke web search.
     """
-    from playwright.async_api import async_playwright
-
-    chrome_path = _find_chrome()
-    if not chrome_path:
-        logger.error("Chrome tidak ditemukan — fallback ke web search untuk Threads.")
-        return await _fallback_web_search(keyword, limit)
+    from browser_manager import manager as browser_manager
 
     search_url = f"https://www.threads.com/search?q={urllib.parse.quote(keyword)}&serp_type=default"
     results: List[dict] = []
+    need_web_fallback = False
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            executable_path=chrome_path,
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-blink-features=AutomationControlled",
-                "--disable-infobars",
-                "--window-size=1280,900",
-                "--disable-dev-shm-usage",
-            ],
-        )
-        try:
-            context = await browser.new_context(
-                viewport={"width": 1280, "height": 900},
-                locale="id-ID",
-                timezone_id="Asia/Jakarta",
-            )
-            await context.add_init_script("""
-                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-                Object.defineProperty(navigator, 'plugins',   { get: () => [1, 2, 3] });
-                window.chrome = { runtime: {}, loadTimes: function(){}, csi: function(){} };
-            """)
-            page = await context.new_page()
+    context = await browser_manager.new_context(
+        viewport={"width": 1280, "height": 900},
+        locale="id-ID",
+        timezone_id="Asia/Jakarta",
+    )
+    try:
+        await context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            Object.defineProperty(navigator, 'plugins',   { get: () => [1, 2, 3] });
+            window.chrome = { runtime: {}, loadTimes: function(){}, csi: function(){} };
+        """)
+        page = await context.new_page()
 
-            logger.info(f"Membuka: {search_url}")
-            await page.goto(search_url, wait_until="domcontentloaded", timeout=DEFAULT_TIMEOUT)
-            await asyncio.sleep(4)
+        logger.info(f"Membuka: {search_url}")
+        await page.goto(search_url, wait_until="domcontentloaded", timeout=DEFAULT_TIMEOUT)
+        await asyncio.sleep(4)
 
-            cur_url = page.url
-            if any(x in cur_url.lower() for x in ["login", "accounts/login"]):
-                logger.warning(f"Threads meminta login — redirect ke {cur_url}. Fallback ke web search.")
-                await context.close()
-                await browser.close()
-                return await _fallback_web_search(keyword, limit)
-
+        cur_url = page.url
+        if any(x in cur_url.lower() for x in ["login", "accounts/login"]):
+            logger.warning(f"Threads meminta login — redirect ke {cur_url}. Fallback ke web search.")
+            need_web_fallback = True
+        else:
             results = await _collect_posts(page, search_url, limit)
-            await context.close()
 
-        except Exception as e:
-            logger.error(f"Error scraping Threads: {e}", exc_info=True)
-        finally:
-            await browser.close()
+    except Exception as e:
+        logger.error(f"Error scraping Threads: {e}", exc_info=True)
+    finally:
+        await context.close()
+
+    if need_web_fallback:
+        return await _fallback_web_search(keyword, limit)
 
     if not results:
         logger.warning("Tidak ada hasil dari Threads — fallback ke web search.")
@@ -363,8 +373,8 @@ async def _collect_posts(page, search_url: str, limit: int) -> List[dict]:
     try:
         scroll_count = 0
         no_new_count = 0
-        max_scrolls = max(20, limit // 2)
-        max_no_new = 10  # login pagination arrives sparsely (1-3 posts, with gaps) — needs patience
+        max_scrolls = max(30, limit // 2)
+        max_no_new = 14  # login pagination arrives sparsely (1-3 posts, with gaps) — needs patience
         while len(posts) < limit and scroll_count < max_scrolls:
             before = len(posts)
             await page.evaluate("window.scrollBy(0, 900)")

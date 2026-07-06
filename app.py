@@ -141,11 +141,7 @@ def _load_batch_results_payload(req_id: str) -> dict | None:
         return None
 
     results = load_results_from_csv(str(file_path))
-    try:
-        with open(file_path, encoding="utf-8-sig") as f:
-            csv_content = f.read()
-    except Exception:
-        csv_content = generate_csv_output(results)
+    csv_content = generate_csv_output(results)
 
     return {
         "req_id":        req_id,
@@ -214,11 +210,12 @@ def api_batch_results(req_id):
 def _build_results_payload(req_id: str, days: int | None = None) -> dict:
     """Agregasi hasil scrape/batch dari CSV untuk dashboard. Dipakai bersama oleh
     POST /api/scrape dan GET /api/results/<req_id>."""
-    from utils import get_overall_distribution, get_timeline_data, get_top_items, filter_df_by_days, get_word_freq_for_df, load_dataframe_cached, compute_confidence_avg
+    from utils import get_overall_distribution, get_timeline_data, choose_timeline_granularity, get_top_items, filter_df_by_days, get_word_freq_for_df, load_dataframe_cached, compute_confidence_avg
     from config import MODEL_METRICS
 
     df = load_dataframe_cached(req_id)
     df_filtered = filter_df_by_days(df, days) if days is not None else df
+    granularity = choose_timeline_granularity(days)
 
     # top_items and confidence_avg use original Indonesian column names
     top_items_raw = get_top_items(df, n=100)
@@ -248,7 +245,8 @@ def _build_results_payload(req_id: str, days: int | None = None) -> dict:
             "neutral_count":  dist["neutral"],
             "negative_count": dist["negative"],
         },
-        "timeline":       get_timeline_data(df_filtered),
+        "timeline":            get_timeline_data(df_filtered, days=days, granularity=granularity),
+        "timeline_granularity": granularity,
         "word_freq":      get_word_freq_for_df(df_filtered),
         "confidence_avg": confidence_avg,
         "top_items":      top_items,
@@ -271,6 +269,9 @@ def _run_scrape_job(job_id: str, keyword: str, limit: int, sources: list, mode: 
         )
         payload = _build_results_payload(pipeline_result["req_id"])
         payload["keyword"] = pipeline_result["keyword"]
+        payload["expanded_keyword"] = pipeline_result.get("expanded_keyword", pipeline_result["keyword"])
+        payload["plain_keyword"] = pipeline_result.get("plain_keyword", pipeline_result["keyword"])
+        payload["expansion_status"] = pipeline_result.get("expansion_status", "unknown")
         job_store.update_job(job_id, status="done", stage="done", percent=100, message="Selesai", result=payload)
     except Exception as e:
         logger.error(f"/api/scrape pipeline error: {e}", exc_info=True)
@@ -298,8 +299,9 @@ def api_scrape():
     sources = ["twitter", "web", "threads"]  # selalu scrape semua sumber
     mode = body.get("mode", "live")
     try:
+        from config import MAX_DAYS_BACK
         days_back = int(body.get("days_back", DEFAULT_DAYS_BACK))
-        days_back = max(1, min(days_back, 30))
+        days_back = max(1, min(days_back, MAX_DAYS_BACK))
     except (ValueError, TypeError):
         days_back = DEFAULT_DAYS_BACK
 
@@ -321,14 +323,16 @@ def api_scrape_status(job_id):
 # =============================================================
 @app.route("/api/results/precomputed", methods=["GET"])
 def api_precomputed():
-    from utils import get_overall_distribution, get_timeline_data, get_top_items, load_dataframe_cached
+    from utils import get_overall_distribution, get_timeline_data, choose_timeline_granularity, get_top_items, load_dataframe_cached
     if not os.path.exists(os.path.join("data", "precomputed_large.csv")):
         return jsonify({"error": "Pre-computed data not found."}), 404
     df = load_dataframe_cached("precomputed")
     from config import MODEL_METRICS
+    granularity = choose_timeline_granularity(None)
     return jsonify({
         "distribution": get_overall_distribution(df),
-        "timeline": get_timeline_data(df),
+        "timeline": get_timeline_data(df, days=None, granularity=granularity),
+        "timeline_granularity": granularity,
         "top_items": get_top_items(df, n=100),
         "model_metrics": MODEL_METRICS
     })

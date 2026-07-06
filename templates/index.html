@@ -12,7 +12,7 @@
 <script>
   window.APP_CONFIG = {
     limit:    parseInt("{{ default_limit }}", 10) || 200,
-    daysBack: parseInt("{{ default_days_back }}", 10) || 7
+    daysBack: parseInt("{{ default_days_back }}", 10) || 365
   };
 </script>
 <script id="tailwind-config">
@@ -1301,7 +1301,7 @@
 
             try {
                 const limit    = (window.APP_CONFIG && window.APP_CONFIG.limit)    || 200;
-                const daysBack = (window.APP_CONFIG && window.APP_CONFIG.daysBack) || 7;
+                const daysBack = (window.APP_CONFIG && window.APP_CONFIG.daysBack) || 365;
                 const sources  = ['twitter', 'web', 'threads'];
 
                 if (_analysisStatus) _analysisStatus.textContent = 'Mengambil dan menganalisis data...';
@@ -1430,7 +1430,7 @@
             const resp = await fetch(url);
             if (!resp.ok) return;
             const data = await resp.json();
-            updateTimelineChart(data.timeline || []);
+            updateTimelineChart(data.timeline || [], data.timeline_granularity || 'day');
             renderWordCloud(data.word_freq || []);
             updateDoughnutChart(data.summary || {});
         } catch (e) {
@@ -1488,10 +1488,18 @@
     }
 
     // --- Updatable chart helpers ---
-    function updateTimelineChart(tlData) {
+    function _formatTimelineLabel(dateStr, granularity) {
+        const d = new Date(dateStr);
+        if (isNaN(d)) return dateStr;
+        if (granularity === 'month') return d.toLocaleDateString('id-ID', { month: 'short', year: 'numeric' });
+        if (granularity === 'week')  return 'Minggu ' + d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short' });
+        return dateStr;
+    }
+
+    function updateTimelineChart(tlData, granularity) {
         const chart = _chartInstances.timeline;
         if (!chart) return;
-        chart.data.labels = tlData.map(d => d.date);
+        chart.data.labels = tlData.map(d => _formatTimelineLabel(d.date, granularity));
         chart.data.datasets[0].data = tlData.map(d => d.positive);
         chart.data.datasets[1].data = tlData.map(d => d.neutral);
         chart.data.datasets[2].data = tlData.map(d => d.negative);
@@ -1526,8 +1534,9 @@
         };
 
         // Timeline Chart — full-width line chart
-        const tlData   = apiData.timeline || [];
-        const tlLabels = tlData.map(d => d.date);
+        const tlData       = apiData.timeline || [];
+        const tlGranularity = apiData.timeline_granularity || 'day';
+        const tlLabels = tlData.map(d => _formatTimelineLabel(d.date, tlGranularity));
         _chartInstances.timeline = new Chart(document.getElementById('timelineChart'), {
             type: 'line',
             data: {

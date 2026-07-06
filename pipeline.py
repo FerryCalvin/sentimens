@@ -5,7 +5,10 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 from pathlib import Path
 
-from config import SCRAPER_BASE_URL, SCRAPER_ENDPOINT, SCRAPER_TIMEOUT
+from config import (
+    SCRAPER_BASE_URL, SCRAPER_ENDPOINT, SCRAPER_TIMEOUT,
+    INFERENCE_TIMEOUT_PER_ITEM_SEC, INFERENCE_TIMEOUT_MIN_SEC, INFERENCE_TIMEOUT_MAX_SEC,
+)
 from inference import predict_batch
 from preprocessing import preprocess_text
 from utils import generate_csv_output, calculate_summary
@@ -130,20 +133,38 @@ def _noop_progress(stage: str, percent: int, message: str = "") -> None:
     pass
 
 
+def _inference_timeout(n_items: int) -> float:
+    return min(INFERENCE_TIMEOUT_MAX_SEC, max(INFERENCE_TIMEOUT_MIN_SEC, INFERENCE_TIMEOUT_PER_ITEM_SEC * n_items))
+
+
 def _predict_all(clean_texts: list[str], progress_cb=None) -> list[dict]:
-    """Jalankan inferensi batch dengan satu timeout keseluruhan sebagai jaring pengaman."""
+    """Jalankan inferensi batch dengan satu timeout keseluruhan sebagai jaring pengaman.
+
+    Tidak memakai `with ThreadPoolExecutor(...)`: keluar dari context manager memanggil
+    `shutdown(wait=True)`, yang akan tetap memblokir caller sampai worker yang sudah
+    dianggap timeout benar-benar selesai — meniadakan timeout itu sendiri. `shutdown(wait=False)`
+    dipanggil eksplisit di tiap cabang supaya caller benar-benar terbebas begitu timeout tercapai.
+    """
     if not clean_texts:
         return []
-    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="bert-infer") as pool:
-        future = pool.submit(predict_batch, clean_texts, 32, progress_cb)
-        try:
-            return future.result(timeout=30 * len(clean_texts))
-        except FuturesTimeoutError:
-            logger.warning(f"[Inference] Timeout — fallback Netral untuk {len(clean_texts)} item")
-            return [_fallback_pred() for _ in clean_texts]
-        except Exception as e:
-            logger.error(f"[Inference] Gagal: {e}", exc_info=True)
-            return [_fallback_pred() for _ in clean_texts]
+    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="bert-infer")
+    future = pool.submit(predict_batch, clean_texts, 32, progress_cb)
+    timeout = _inference_timeout(len(clean_texts))
+    try:
+        result = future.result(timeout=timeout)
+        pool.shutdown(wait=False)
+        return result
+    except FuturesTimeoutError:
+        logger.warning(
+            f"[Inference] Timeout setelah {timeout:.0f}s — fallback Netral untuk {len(clean_texts)} item "
+            "(worker thread dibiarkan jalan di background, hasilnya dibuang)."
+        )
+        pool.shutdown(wait=False)
+        return [_fallback_pred() for _ in clean_texts]
+    except Exception as e:
+        logger.error(f"[Inference] Gagal: {e}", exc_info=True)
+        pool.shutdown(wait=False)
+        return [_fallback_pred() for _ in clean_texts]
 
 
 def run_scrape_pipeline(
@@ -160,14 +181,18 @@ def run_scrape_pipeline(
 
     progress_cb("scraping", 5, "Mengambil data dari Twitter/X, Web, dan Threads...")
 
+    expanded_keyword = keyword
+    plain_keyword = keyword
+    expansion_status = "scraper_service_unavailable_fallback"
+
     try:
         scraper_url = f"{SCRAPER_BASE_URL}{SCRAPER_ENDPOINT}"
         response = httpx.post(
             scraper_url,
             json={"keyword": keyword, "limit": limit, "sources": sources, "days_back": days_back},
             timeout=httpx.Timeout(
-                connect=10.0,   # Koneksi awal cepat (scraper harus sudah jalan)
-                read=300.0,     # Tunggu 5 menit untuk scraping selesai
+                connect=10.0,           # Koneksi awal cepat (scraper harus sudah jalan)
+                read=SCRAPER_TIMEOUT,   # Harus >= timeout internal scraper service
                 write=10.0,
                 pool=5.0,
             ),
@@ -176,6 +201,9 @@ def run_scrape_pipeline(
         scraper_data = response.json()
         if scraper_data.get("status") == "success":
             data = scraper_data.get("data", [])
+            expanded_keyword = scraper_data.get("expanded_keyword", keyword)
+            plain_keyword = scraper_data.get("plain_keyword", keyword)
+            expansion_status = scraper_data.get("expansion_status", "unknown")
             logger.info(f"[Pipeline] Scraper eksternal: {len(data)} hasil")
         else:
             data = []
@@ -203,6 +231,9 @@ def run_scrape_pipeline(
             "file_path": str(file_path),
             "summary": {"Positif": 0, "Negatif": 0, "Netral": 0, "total": 0},
             "keyword": keyword,
+            "expanded_keyword": expanded_keyword,
+            "plain_keyword": plain_keyword,
+            "expansion_status": expansion_status,
         }
 
     raw_texts    = [t.get("raw_text", "") for t in data]
@@ -251,6 +282,9 @@ def run_scrape_pipeline(
         "file_path": str(file_path),
         "summary": summary,
         "keyword": keyword,
+        "expanded_keyword": expanded_keyword,
+        "plain_keyword": plain_keyword,
+        "expansion_status": expansion_status,
     }
 
 

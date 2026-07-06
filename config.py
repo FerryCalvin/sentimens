@@ -40,12 +40,22 @@ SCRAPER_ENDPOINT = "/scrape"
 # FIX #1: Timeout diperbesar dari 60s → 300s
 # Dual-scraping (Twitter + web search paralel) bisa butuh 60-120 detik.
 # 300s = buffer aman agar pipeline tidak timeout sebelum scraper selesai.
-SCRAPER_TIMEOUT  = 300
-DEFAULT_SCRAPE_LIMIT = int(os.getenv("SCRAPE_LIMIT", "200"))
-DEFAULT_DAYS_BACK    = int(os.getenv("DAYS_BACK",    "7"))
+# FIX #2: Dinaikkan ke 1800s — harus >= SCRAPE_COROUTINE_TIMEOUT scraper service
+# (1500s), jika tidak client selalu menyerah duluan sebelum server selesai.
+SCRAPER_TIMEOUT  = int(os.getenv("SCRAPER_TIMEOUT", "1800"))
+DEFAULT_SCRAPE_LIMIT = int(os.getenv("SCRAPE_LIMIT", "500"))
+DEFAULT_DAYS_BACK    = int(os.getenv("DAYS_BACK",    "365"))
 
 # --- Batch Processing ---
 BATCH_CHUNK_SIZE = 32  # Proses per-batch untuk efisiensi memori
+
+# --- Inference Timeout (jaring pengaman untuk _predict_all) ---
+INFERENCE_TIMEOUT_PER_ITEM_SEC = float(os.getenv("INFERENCE_TIMEOUT_PER_ITEM_SEC", "1.5"))
+INFERENCE_TIMEOUT_MIN_SEC      = float(os.getenv("INFERENCE_TIMEOUT_MIN_SEC", "30"))
+INFERENCE_TIMEOUT_MAX_SEC      = float(os.getenv("INFERENCE_TIMEOUT_MAX_SEC", "300"))
+
+# --- Scraper history window ---
+MAX_DAYS_BACK = int(os.getenv("MAX_DAYS_BACK", "365"))
 
 # --- Kolom CSV Output (FR-BT-05) ---
 CSV_OUTPUT_COLUMNS = [
@@ -59,16 +69,16 @@ CSV_OUTPUT_COLUMNS = [
     "date",
 ]
 
-# --- Model Evaluation Metrics (hasil testing pada FINAL_TEST_verified, n=1873) ---
+# --- Model Evaluation Metrics (hasil testing model augmented pada test set, n=2173) ---
 MODEL_METRICS = {
-    "Accuracy":  90.76,
-    "Precision": 88.12,
-    "Recall":    85.70,
-    "F1_Score":  86.73,
+    "Accuracy":  91.62,
+    "Precision": 91.10,
+    "Recall":    91.41,
+    "F1_Score":  91.24,
     "per_class": {
-        "Negatif": {"precision": 89.38, "recall": 94.52, "f1": 91.88, "support": 730},
-        "Netral":  {"precision": 80.68, "recall": 69.01, "f1": 74.39, "support": 242},
-        "Positif": {"precision": 94.30, "recall": 93.56, "f1": 93.93, "support": 901},
+        "Negatif": {"precision": 92.32, "recall": 89.49, "f1": 90.88, "support": 752},
+        "Netral":  {"precision": 87.41, "recall": 90.94, "f1": 89.14, "support": 519},
+        "Positif": {"precision": 93.58, "recall": 93.79, "f1": 93.69, "support": 902},
     },
 }
 

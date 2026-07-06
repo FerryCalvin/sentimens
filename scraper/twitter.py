@@ -59,25 +59,6 @@ COOKIES_FILE = Path(__file__).parent / "cookies_config.json"
 SESSION_FILE = Path(__file__).parent / "twitter_session.json"  # fallback lama
 DEFAULT_TIMEOUT = 45_000
 
-_CHROME_PATHS = [
-    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-]
-try:
-    import os as _os
-    _CHROME_PATHS.append(
-        rf"C:\Users\{_os.environ.get('USERNAME','User')}\AppData\Local\Google\Chrome\Application\chrome.exe"
-    )
-except Exception:
-    pass
-
-
-def _find_chrome() -> str | None:
-    for p in _CHROME_PATHS:
-        if Path(p).exists():
-            return p
-    return None
-
 
 def _load_cookies() -> dict:
     """Muat cookies dari cookies_config.json."""
@@ -140,187 +121,129 @@ async def scrape_twitter(keyword: str, limit: int, days_back: int = 7) -> List[d
     return await _fallback_web_search(keyword, limit)
 
 
-async def _scrape_with_cookies(keyword: str, limit: int, raw_cookies: dict, days_back: int = 7) -> List[dict]:
+async def _scrape_one_window(
+    search_url: str, limit: int, *, cookies: dict | None = None, storage_state: str | None = None
+) -> tuple[List[dict], bool]:
     """
-    Buka Chrome, inject cookies X, lalu scrape x.com/search.
-    Tidak perlu buka halaman login sama sekali.
+    Buka 1 context (browser bersama dari browser_manager), scrape 1 window
+    pencarian (1 rentang tanggal), lalu tutup context (bukan browser).
+    Returns (results, auth_failed) — auth_failed=True berarti cookie/session
+    tidak valid (redirect ke login), sehingga caller sebaiknya berhenti
+    mencoba bucket berikutnya dan fallback ke jalur auth lain.
     """
-    from playwright.async_api import async_playwright
-    from datetime import date, timedelta
+    from browser_manager import manager as browser_manager
 
-    chrome_path = _find_chrome()
-    if not chrome_path:
-        logger.error("Chrome tidak ditemukan.")
-        return []
+    context_kwargs = {
+        "viewport": {"width": 1280, "height": 900},
+        "locale": "id-ID",
+        "timezone_id": "Asia/Jakarta",
+    }
+    if storage_state:
+        context_kwargs["storage_state"] = storage_state
 
-    playwright_cookies = _build_playwright_cookies(raw_cookies)
-    today      = date.today()
-    since_date = (today - timedelta(days=days_back)).isoformat()
-    until_date = today.isoformat()
-    full_query = f"{keyword} since:{since_date} until:{until_date}"
-    search_url = (
-        f"https://x.com/search?q={urllib.parse.quote(full_query)}"
-        f"&src=typed_query&f=top"
-    )
-
+    context = await browser_manager.new_context(**context_kwargs)
     results: List[dict] = []
+    try:
+        await context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            Object.defineProperty(navigator, 'plugins',   { get: () => [1, 2, 3] });
+            window.chrome = { runtime: {}, loadTimes: function(){}, csi: function(){} };
+        """)
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            executable_path=chrome_path,
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-blink-features=AutomationControlled",
-                "--disable-infobars",
-                "--window-size=1280,900",
-                "--disable-dev-shm-usage",
-            ],
-        )
-        try:
-            # Buat context kosong, lalu inject cookies
-            context = await browser.new_context(
-                viewport={"width": 1280, "height": 900},
-                locale="id-ID",
-                timezone_id="Asia/Jakarta",
-            )
-            await context.add_init_script("""
-                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-                Object.defineProperty(navigator, 'plugins',   { get: () => [1, 2, 3] });
-                window.chrome = { runtime: {}, loadTimes: function(){}, csi: function(){} };
-            """)
-
-            # Inject cookies (seperti autoscraper cookienya)
+        if cookies:
+            playwright_cookies = _build_playwright_cookies(cookies)
             await context.add_cookies(playwright_cookies)
             logger.info(f"Injected {len(playwright_cookies)//2} cookies ke browser")
 
-            page = await context.new_page()
+        page = await context.new_page()
 
-            # Langsung ke halaman search (tidak perlu halaman login!)
-            logger.info(f"Membuka: {search_url}")
-            await page.goto(search_url, wait_until="domcontentloaded", timeout=DEFAULT_TIMEOUT)
-            await asyncio.sleep(4)
+        logger.info(f"Membuka: {search_url}")
+        await page.goto(search_url, wait_until="domcontentloaded", timeout=DEFAULT_TIMEOUT)
+        await asyncio.sleep(4)
 
-            # Cek apakah masih redirect ke login
-            cur_url = page.url
-            if any(x in cur_url.lower() for x in ["login", "i/flow", "signup"]):
-                logger.warning(f"Cookie tidak valid — redirect ke {cur_url}")
-                await context.close()
-                return []
+        cur_url = page.url
+        if any(x in cur_url.lower() for x in ["login", "i/flow", "signup"]):
+            logger.warning(f"Auth tidak valid — redirect ke {cur_url}")
+            return [], True
 
-            logger.info(f"Cookie valid! URL: {cur_url[:60]}")
+        results = await _collect_tweets(page, search_url, limit)
 
-            # ── Scroll & kumpulkan tweet ──────────────────────────────────
-            results = await _collect_tweets(page, search_url, limit)
+        # Jika Top tab habis sebelum limit, coba Latest tab (&f=live)
+        if len(results) < limit:
+            remaining = limit - len(results)
+            latest_url = search_url.replace("f=top", "f=live")
+            logger.info(
+                f"Top tab exhausted ({len(results)}/{limit}) — "
+                f"switching to Latest tab for {remaining} more..."
+            )
+            await page.goto(latest_url, wait_until="domcontentloaded", timeout=DEFAULT_TIMEOUT)
+            await asyncio.sleep(3)
+            more = await _collect_tweets(page, latest_url, remaining)
+            existing_keys = {r["raw_text"][:80] for r in results}
+            added = 0
+            for r in more:
+                key = r["raw_text"][:80]
+                if key not in existing_keys:
+                    existing_keys.add(key)
+                    results.append(r)
+                    added += 1
+            if added:
+                logger.info(f"Latest tab added {added} tweets. Total: {len(results)}")
 
-            # Jika Top tab habis sebelum limit, coba Latest tab (&f=live)
-            if len(results) < limit:
-                remaining = limit - len(results)
-                latest_url = search_url.replace("f=top", "f=live")
-                logger.info(
-                    f"Top tab exhausted ({len(results)}/{limit}) — "
-                    f"switching to Latest tab for {remaining} more..."
-                )
-                await page.goto(latest_url, wait_until="domcontentloaded", timeout=DEFAULT_TIMEOUT)
-                await asyncio.sleep(3)
-                more = await _collect_tweets(page, latest_url, remaining)
-                existing_keys = {r["raw_text"][:80] for r in results}
-                added = 0
-                for r in more:
-                    key = r["raw_text"][:80]
-                    if key not in existing_keys:
-                        existing_keys.add(key)
-                        results.append(r)
-                        added += 1
-                if added:
-                    logger.info(f"Latest tab added {added} tweets. Total: {len(results)}")
+    except Exception as e:
+        logger.error(f"Error scraping window: {e}", exc_info=True)
+    finally:
+        await context.close()
 
-            await context.close()
+    return results, False
 
-        except Exception as e:
-            logger.error(f"Error scraping dengan cookies: {e}", exc_info=True)
-        finally:
-            await browser.close()
 
-    return results
+async def _scrape_windowed(keyword: str, limit: int, days_back: int, *,
+                            cookies: dict | None = None, storage_state: str | None = None) -> List[dict]:
+    """Bagi `days_back` jadi beberapa bucket tanggal dan scrape tiap bucket via _scrape_one_window."""
+    from date_buckets import build_date_buckets
+
+    buckets = build_date_buckets(days_back)
+    per_bucket_limit = max(5, limit // len(buckets))
+    all_results: List[dict] = []
+    seen: set = set()
+
+    for i, (since_date, until_date) in enumerate(buckets):
+        if len(all_results) >= limit:
+            break
+        full_query = f"{keyword} since:{since_date} until:{until_date}"
+        search_url = f"https://x.com/search?q={urllib.parse.quote(full_query)}&src=typed_query&f=top"
+
+        window_results, auth_failed = await _scrape_one_window(
+            search_url, per_bucket_limit, cookies=cookies, storage_state=storage_state
+        )
+        if auth_failed:
+            logger.warning("Auth invalid pada bucket pertama — menghentikan loop, jalur ini dianggap gagal total.")
+            return []
+
+        for r in window_results:
+            key = r["raw_text"][:80]
+            if key not in seen:
+                seen.add(key)
+                all_results.append(r)
+
+        if i < len(buckets) - 1:
+            await asyncio.sleep(random.uniform(1.5, 3.0))  # jeda antar-bucket, anti-burst
+
+    if len(buckets) > 1:
+        logger.info(f"Windowed scrape: {len(buckets)} bucket, {len(all_results)} tweet unik terkumpul")
+
+    return all_results[:limit]
+
+
+async def _scrape_with_cookies(keyword: str, limit: int, raw_cookies: dict, days_back: int = 7) -> List[dict]:
+    """Buka Chrome (browser bersama), inject cookies X, scrape x.com/search per bucket tanggal."""
+    return await _scrape_windowed(keyword, limit, days_back, cookies=raw_cookies)
 
 
 async def _scrape_with_session(keyword: str, limit: int, days_back: int = 7) -> List[dict]:
-    """Fallback: pakai Playwright storage_state lama."""
-    from playwright.async_api import async_playwright
-    from datetime import date, timedelta
-
-    chrome_path = _find_chrome()
-    if not chrome_path:
-        return []
-
-    today      = date.today()
-    since_date = (today - timedelta(days=days_back)).isoformat()
-    until_date = today.isoformat()
-    full_query = f"{keyword} since:{since_date} until:{until_date}"
-    search_url = (
-        f"https://x.com/search?q={urllib.parse.quote(full_query)}"
-        f"&src=typed_query&f=top"
-    )
-    results: List[dict] = []
-
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            executable_path=chrome_path,
-            headless=True,
-            args=["--no-sandbox", "--disable-blink-features=AutomationControlled",
-                  "--window-size=1280,900"],
-        )
-        try:
-            context = await browser.new_context(
-                storage_state=str(SESSION_FILE),
-                viewport={"width": 1280, "height": 900},
-                locale="id-ID",
-                timezone_id="Asia/Jakarta",
-            )
-            await context.add_init_script("""
-                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-                window.chrome = { runtime: {} };
-            """)
-            page = await context.new_page()
-            await page.goto(search_url, wait_until="domcontentloaded", timeout=DEFAULT_TIMEOUT)
-            await asyncio.sleep(4)
-
-            if any(x in page.url.lower() for x in ["login", "flow"]):
-                await context.close()
-                return []
-
-            results = await _collect_tweets(page, search_url, limit)
-
-            # Jika Top tab habis sebelum limit, coba Latest tab (&f=live)
-            if len(results) < limit:
-                remaining = limit - len(results)
-                latest_url = search_url.replace("f=top", "f=live")
-                logger.info(
-                    f"Top tab exhausted ({len(results)}/{limit}) — "
-                    f"switching to Latest tab for {remaining} more..."
-                )
-                await page.goto(latest_url, wait_until="domcontentloaded", timeout=DEFAULT_TIMEOUT)
-                await asyncio.sleep(3)
-                more = await _collect_tweets(page, latest_url, remaining)
-                existing_keys = {r["raw_text"][:80] for r in results}
-                added = 0
-                for r in more:
-                    key = r["raw_text"][:80]
-                    if key not in existing_keys:
-                        existing_keys.add(key)
-                        results.append(r)
-                        added += 1
-                if added:
-                    logger.info(f"Latest tab added {added} tweets. Total: {len(results)}")
-
-            await context.close()
-        except Exception as e:
-            logger.error(f"Error session lama: {e}")
-        finally:
-            await browser.close()
-
-    return results
+    """Fallback: pakai Playwright storage_state lama, scrape x.com/search per bucket tanggal."""
+    return await _scrape_windowed(keyword, limit, days_back, storage_state=str(SESSION_FILE))
 
 
 async def _collect_tweets(page, search_url: str, limit: int) -> List[dict]:
@@ -328,8 +251,8 @@ async def _collect_tweets(page, search_url: str, limit: int) -> List[dict]:
     results: List[dict] = []
     collected_texts: set = set()
     no_new_count = 0
-    max_no_new  = 6
-    max_scrolls = max(20, limit // 5)
+    max_no_new  = 10
+    max_scrolls = max(30, limit // 3)
     scroll_count = 0
 
     while len(results) < limit and scroll_count < max_scrolls:

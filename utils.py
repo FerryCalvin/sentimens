@@ -2,6 +2,7 @@
 # utils.py — Helper Functions
 # ============================================================
 import io
+import os
 import csv
 import logging
 from collections import Counter, OrderedDict
@@ -11,10 +12,23 @@ from markupsafe import escape
 
 from config import CSV_OUTPUT_COLUMNS
 
-# LRU cache with a hard cap — evicts the oldest entry when full
+# LRU cache with a hard cap — evicts the oldest entry when full.
+# Values are (stat_key, data) tuples for path-keyed/request_id-keyed entries below,
+# EXCEPT the dead `get_results()` aggregation path further down, which stores plain
+# dicts under bare request_id keys in `_results_cache` (different key shape, never
+# collides with the file-path keys used by `load_results_from_csv`).
 _CACHE_MAX_SIZE = 50
 _results_cache: OrderedDict = OrderedDict()
 _df_cache: OrderedDict = OrderedDict()
+
+
+def _stat_key(file_path: str) -> tuple[float, int] | None:
+    """(mtime, size) fingerprint of a file, used to detect on-disk changes for cache invalidation."""
+    try:
+        st = os.stat(file_path)
+        return (st.st_mtime, st.st_size)
+    except OSError:
+        return None
 
 CSV_DTYPES = {
     "teks_asli": "string",
@@ -131,9 +145,9 @@ def generate_csv_output(results: list[dict]) -> str:
             "teks_asli": result.get("raw_text", ""),
             "teks_bersih": result.get("clean_text", ""),
             "sentimen": result.get("predicted_label", ""),
-            "confidence_positif": result.get("confidence_positive", 0.0),
-            "confidence_negatif": result.get("confidence_negative", 0.0),
-            "confidence_netral": result.get("confidence_neutral", 0.0),
+            "confidence_positif": round(float(result.get("confidence_positive", 0.0) or 0.0), 6),
+            "confidence_negatif": round(float(result.get("confidence_negative", 0.0) or 0.0), 6),
+            "confidence_netral": round(float(result.get("confidence_neutral", 0.0) or 0.0), 6),
             "source": result.get("source", ""),
             "date": result.get("date", ""),
         })
@@ -145,9 +159,11 @@ def load_results_from_csv(file_path: str) -> list[dict]:
     Muat hasil dari CSV dengan caching memory dan DTYPE optimization.
     Ini menjamin pemuatan ke memori di bawah 3 detik.
     """
-    if file_path in _results_cache:
+    stat_key = _stat_key(file_path)
+    cached = _results_cache.get(file_path)
+    if cached is not None and stat_key is not None and cached[0] == stat_key:
         _results_cache.move_to_end(file_path)  # LRU: mark as recently used
-        return _results_cache[file_path]
+        return cached[1]
 
     try:
         df = pd.read_csv(
@@ -199,7 +215,7 @@ def load_results_from_csv(file_path: str) -> list[dict]:
                 if not isinstance(val, str) and (val is None or pd.isna(val)):
                     r[k] = 0.0
 
-        _results_cache[file_path] = results
+        _results_cache[file_path] = (stat_key, results)
         if len(_results_cache) > _CACHE_MAX_SIZE:
             _results_cache.popitem(last=False)  # evict least recently used
         return results
@@ -266,21 +282,24 @@ def get_confidence_badge_class(label: str) -> str:
     }
     return badge_map.get(label, "secondary")
 
-import os
-
 # --- PHASE 3 PANDAS FUNCTIONS ---
 from config import CSV_OUTPUT_COLUMNS
 
+def _resolve_csv_path(request_id: str) -> str | None:
+    """Resolve a request_id to its on-disk CSV path, applying the 'precomputed' fallback."""
+    path = f'data/{request_id}.csv'
+    if os.path.exists(path):
+        return path
+    if request_id == "precomputed" and os.path.exists('data/precomputed_large.csv'):
+        return 'data/precomputed_large.csv'
+    return None
+
 def load_dataframe(request_id: str) -> pd.DataFrame:
     """Load CSV dengan dtype eksplisit dan kolom selektif untuk performa optimal."""
-    path = f'data/{request_id}.csv'
-    if not os.path.exists(path):
-        # Fallback to precomputed for testing if req not found
-        if request_id == "precomputed":
-            path = 'data/precomputed_large.csv'
-        else:
-            return pd.DataFrame()
-            
+    path = _resolve_csv_path(request_id)
+    if path is None:
+        return pd.DataFrame()
+
     return pd.read_csv(
         path,
         dtype=CSV_DTYPES,
@@ -291,12 +310,15 @@ def load_dataframe(request_id: str) -> pd.DataFrame:
 
 def load_dataframe_cached(request_id: str) -> pd.DataFrame:
     """Load DataFrame with LRU cache to avoid redundant disk I/O on repeated polls."""
-    if request_id in _df_cache:
+    path = _resolve_csv_path(request_id)
+    stat_key = _stat_key(path) if path else None
+    cached = _df_cache.get(request_id)
+    if cached is not None and stat_key is not None and cached[0] == stat_key:
         _df_cache.move_to_end(request_id)
-        return _df_cache[request_id]
+        return cached[1]
     df = load_dataframe(request_id)
     if not df.empty:
-        _df_cache[request_id] = df
+        _df_cache[request_id] = (stat_key, df)
         if len(_df_cache) > _CACHE_MAX_SIZE:
             _df_cache.popitem(last=False)
     return df
@@ -353,6 +375,10 @@ def get_overall_distribution(df: pd.DataFrame) -> dict:
     return build_distribution(df)
 
 
+def _days_cutoff(days: int) -> pd.Timestamp:
+    return pd.Timestamp.now() - pd.Timedelta(days=days)
+
+
 def filter_df_by_days(df: pd.DataFrame, days: int) -> pd.DataFrame:
     """Return rows from the last `days` days based on the `date` column."""
     if 'date' not in df.columns or df.empty:
@@ -363,7 +389,7 @@ def filter_df_by_days(df: pd.DataFrame, days: int) -> pd.DataFrame:
     df = df.dropna(subset=['date'])
     if df['date'].dt.tz is not None:
         df['date'] = df['date'].dt.tz_localize(None)
-    cutoff = pd.Timestamp.now() - pd.Timedelta(days=days)
+    cutoff = _days_cutoff(days)
     return df[df['date'] >= cutoff]
 
 
@@ -377,15 +403,28 @@ def get_word_freq_for_df(df: pd.DataFrame) -> list:
     return [[word, count] for word, count in list(freq_dict.items())[:50]]
 
 
-def get_timeline_data(df: pd.DataFrame) -> list:
+def choose_timeline_granularity(days: int | None) -> str:
+    """Pick a chart bucket size so long ranges don't render as sparse per-day points."""
+    if days is None or days > 180:
+        return "month"
+    if days > 31:
+        return "week"
+    return "day"
+
+
+def get_timeline_data(df: pd.DataFrame, days: int | None = None, granularity: str | None = None) -> list:
     """
     Konversi timeline dict ke format list yang dipakai frontend SPA.
+    Buckets by day/week/month (via `granularity`, auto-picked from `days` if omitted)
+    and zero-fills empty buckets so long ranges render as a continuous series.
     Returns list of {date, positive, negative, neutral}.
     """
     if 'date' not in df.columns or df.empty:
         return []
 
     try:
+        granularity = granularity or choose_timeline_granularity(days)
+
         # Pastikan kolom date sudah datetime
         if not pd.api.types.is_datetime64_any_dtype(df['date']):
             df = df.copy()
@@ -394,15 +433,39 @@ def get_timeline_data(df: pd.DataFrame) -> list:
         if df.empty:
             return []
 
-        grouped = df.groupby([df['date'].dt.date, 'sentimen'], observed=False).size().unstack(fill_value=0)
+        if granularity == "week":
+            bucket_key = df['date'].dt.to_period('W-MON').dt.start_time
+            freq = 'W-MON'
+        elif granularity == "month":
+            bucket_key = df['date'].dt.to_period('M').dt.start_time
+            freq = 'MS'
+        else:
+            bucket_key = df['date'].dt.normalize()
+            freq = 'D'
+
+        grouped = df.groupby([bucket_key, 'sentimen'], observed=False).size().unstack(fill_value=0)
         for col in ['Positif', 'Netral', 'Negatif']:
             if col not in grouped.columns:
                 grouped[col] = 0
 
+        range_end = pd.Timestamp.now().normalize()
+        range_start = _days_cutoff(days).normalize() if days else df['date'].min().normalize()
+        if range_start > range_end:
+            range_start = range_end
+        # Snap range_start to the bucket boundary — pd.date_range(freq='MS'/'W-MON') only emits
+        # dates ON that boundary, so an unaligned start silently drops the first partial bucket.
+        if granularity == "week":
+            range_start = range_start.to_period('W-MON').start_time
+        elif granularity == "month":
+            range_start = range_start.to_period('M').start_time
+        full_index = pd.date_range(range_start, range_end, freq=freq)
+        if len(full_index) > 0:
+            grouped = grouped.reindex(full_index, fill_value=0)
+
         result = []
         for date_val, row in grouped.to_dict(orient='index').items():
             result.append({
-                "date":     str(date_val),
+                "date":     pd.Timestamp(date_val).date().isoformat(),
                 "positive": int(row.get('Positif', 0)),
                 "neutral":  int(row.get('Netral',  0)),
                 "negative": int(row.get('Negatif', 0)),

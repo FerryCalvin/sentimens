@@ -10,6 +10,7 @@ sehingga web search tidak menunggu Twitter selesai.
 """
 from flask import Flask, jsonify, request
 import asyncio
+import atexit
 import logging
 import sys
 import os
@@ -17,7 +18,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 _DEFAULT_LIMIT     = int(os.getenv("SCRAPE_LIMIT", "200"))
-_DEFAULT_DAYS_BACK = int(os.getenv("DAYS_BACK",    "7"))
+_DEFAULT_DAYS_BACK = int(os.getenv("DAYS_BACK",    "365"))
+_MAX_DAYS_BACK      = int(os.getenv("MAX_DAYS_BACK", "365"))
+_SCRAPE_COROUTINE_TIMEOUT = int(os.getenv("SCRAPE_COROUTINE_TIMEOUT", "1500"))
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -29,9 +32,12 @@ logging.basicConfig(
 
 app = Flask(__name__)
 
+from browser_manager import manager as browser_manager
+
 
 def run_async(coro):
-    """Jalankan coroutine async dari thread synchronous Flask."""
+    """Jalankan coroutine async dari thread synchronous Flask (dipakai untuk coroutine yang
+    TIDAK menyentuh browser bersama — semua jalur browser-based lewat browser_manager.run_coroutine)."""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
@@ -40,7 +46,8 @@ def run_async(coro):
         loop.close()
 
 
-async def _scrape_parallel(keyword: str, expanded_keyword: str, twitter_limit: int, web_limit: int, threads_limit: int, sources: list, days_back: int = 7) -> dict:
+async def _scrape_parallel(keyword: str, expanded_keyword: str, twitter_limit: int, web_limit: int, threads_limit: int,
+                            sources: list, days_back: int = 7, plain_keyword: str | None = None) -> dict:
     """
     Jalankan Twitter + Web search + Threads secara PARALEL menggunakan asyncio.gather.
 
@@ -49,13 +56,17 @@ async def _scrape_parallel(keyword: str, expanded_keyword: str, twitter_limit: i
 
     Twitter dan web dapat `expanded_keyword` (hasil LLM query expansion — query
     Boolean bergaya Twitter/X, mis. `("kopi" OR "coffee") jakarta`). Threads dapat
-    `keyword` asli apa adanya: mesin pencari Threads tidak memahami sintaks Boolean/
-    tanda kutip tsb dan akan mengembalikan nol hasil jika diberi query itu
-    (diverifikasi langsung — bukan asumsi).
+    `plain_keyword` (varian frasa polos hasil expansion yang sama, tanpa operator
+    Boolean/tanda kutip) — mesin pencari Threads tidak memahami sintaks Boolean
+    tsb dan akan mengembalikan nol hasil jika diberi query Boolean mentah
+    (diverifikasi langsung — bukan asumsi), tapi tetap bisa diuntungkan dari
+    pengayaan sinonim selama formatnya frasa biasa.
     """
     from twitter import scrape_twitter
     from web_search import scrape_web_search
     from threads import scrape_threads
+
+    plain_keyword = plain_keyword or keyword
 
     tasks = []
     labels = []
@@ -69,7 +80,7 @@ async def _scrape_parallel(keyword: str, expanded_keyword: str, twitter_limit: i
         labels.append("web")
 
     if "threads" in sources:
-        tasks.append(scrape_threads(keyword, threads_limit, days_back=days_back))
+        tasks.append(scrape_threads(plain_keyword, threads_limit, days_back=days_back))
         labels.append("threads")
 
     if not tasks:
@@ -88,6 +99,72 @@ async def _scrape_parallel(keyword: str, expanded_keyword: str, twitter_limit: i
             logger.info(f"{label}: {len(output[label])} hasil")
 
     return output
+
+
+async def _scrape_with_redistribution(keyword: str, expanded_keyword: str, plain_keyword: str,
+                                       twitter_limit: int, web_limit: int, threads_limit: int,
+                                       sources: list, days_back: int = 7) -> dict:
+    """
+    Jalankan _scrape_parallel, lalu kalau ada sumber yang under-deliver (mis. Threads
+    anonim mentok ~20 padahal limit lebih tinggi) dan sumber lain masih longgar,
+    jalankan 1 putaran tambahan ke sumber yang longgar dengan bonus kuota.
+
+    CATATAN: ini scroll ulang dari atas (tidak ada cursor yang bisa disambung
+    antar call), jadi hasil duplikat di-dedupe — efektifitasnya bergantung pada
+    kesabaran scroll yang sudah dinaikkan di twitter.py/threads.py.
+    """
+    from twitter import scrape_twitter
+    from web_search import scrape_web_search
+    from threads import scrape_threads
+
+    scraped = await _scrape_parallel(
+        keyword, expanded_keyword, twitter_limit, web_limit, threads_limit, sources,
+        days_back=days_back, plain_keyword=plain_keyword,
+    )
+
+    shortfalls = {}
+    if "twitter" in sources:
+        shortfalls["twitter"] = max(0, twitter_limit - len(scraped["twitter"]))
+    if "threads" in sources:
+        shortfalls["threads"] = max(0, threads_limit - len(scraped["threads"]))
+    if "web" in sources or "news" in sources:
+        shortfalls["web"] = max(0, web_limit - len(scraped["web"]))
+
+    total_shortfall = sum(shortfalls.values())
+    headroom = [s for s, short in shortfalls.items() if short == 0]
+    if total_shortfall <= 0 or not headroom:
+        return scraped
+
+    bonus = max(5, total_shortfall // len(headroom))
+    logger.info(f"Redistributing shortfall={total_shortfall} ke {headroom} (+{bonus} tiap sumber)")
+
+    tasks, labels = [], []
+    if "twitter" in headroom:
+        tasks.append(scrape_twitter(expanded_keyword, bonus, days_back=days_back))
+        labels.append("twitter")
+    if "web" in headroom:
+        tasks.append(scrape_web_search(expanded_keyword, bonus, days_back=days_back))
+        labels.append("web")
+    if "threads" in headroom:
+        tasks.append(scrape_threads(plain_keyword, bonus, days_back=days_back))
+        labels.append("threads")
+
+    extra = await asyncio.gather(*tasks, return_exceptions=True)
+    for label, res in zip(labels, extra):
+        if isinstance(res, Exception):
+            logger.warning(f"Redistribution fetch untuk {label} gagal: {res}")
+            continue
+        existing = {r.get("raw_text", "")[:80] for r in scraped[label]}
+        added = 0
+        for item in (res or []):
+            key = item.get("raw_text", "")[:80]
+            if key and key not in existing:
+                existing.add(key)
+                scraped[label].append(item)
+                added += 1
+        logger.info(f"Redistribution menambah {added} item {label}")
+
+    return scraped
 
 
 @app.route("/health", methods=["GET"])
@@ -163,7 +240,7 @@ def scrape():
             return jsonify({"status": "error", "message": "keyword required"}), 400
 
         limit     = max(10, min(limit, 500))
-        days_back = max(1, min(days_back, 30))
+        days_back = max(1, min(days_back, _MAX_DAYS_BACK))
 
         # ── Bagi jatah ─────────────────────────────────────────────────
         # Twitter dan Threads adalah sumber utama, masing-masing dapat 100%
@@ -179,41 +256,89 @@ def scrape():
             f"threads={threads_limit} | days_back={days_back}"
         )
 
-        # LLM-based query expansion — expands keyword with synonyms/slang before scraping.
-        # Falls back silently to original keyword if OpenRouter is unreachable.
+        # LLM-based query expansion — expands keyword into a Boolean query (Twitter/Web)
+        # and a plain merged-phrase variant (Threads, which can't parse Boolean/quotes).
+        # Falls back to the original keyword for both on any failure/timeout.
         from query_expansion import expand_query
-        expanded_keyword = expand_query(keyword)
+        expanded_keyword, plain_keyword, expansion_status = expand_query(keyword)
 
-        # Jalankan paralel
-        scraped = run_async(_scrape_parallel(keyword, expanded_keyword, twitter_limit, web_limit, threads_limit, sources, days_back=days_back))
+        # Jalankan paralel (di event loop bersama browser_manager) + redistribusi shortfall
+        scraped = browser_manager.run_coroutine(
+            _scrape_with_redistribution(
+                keyword, expanded_keyword, plain_keyword,
+                twitter_limit, web_limit, threads_limit, sources, days_back=days_back,
+            ),
+            timeout=_SCRAPE_COROUTINE_TIMEOUT,
+        )
 
         twitter_results = scraped.get("twitter", [])
         web_results     = scraped.get("web", [])
         threads_results = scraped.get("threads", [])
 
-        # ── Gabungkan: Twitter + Threads dulu, web sebagai pelengkap ────
-        combined = list(twitter_results) + list(threads_results)
+        # ── Gabungkan proporsional: Twitter, Web, dan Threads adalah sumber
+        # PARALEL yang setara (bukan primer + fallback), jadi hasil akhir harus
+        # memuat porsi dari ketiganya, bukan salah satu mendominasi lalu
+        # memotong yang lain saat displice ke `limit`.
+        source_lists = {}
+        if "twitter" in sources:
+            source_lists["twitter"] = list(twitter_results)
+        if "web" in sources or "news" in sources:
+            source_lists["web"] = list(web_results)
+        if "threads" in sources:
+            source_lists["threads"] = list(threads_results)
 
-        # Tambahkan web hanya jika sumber utama kurang dari limit
-        existing_texts = {r.get("raw_text", "")[:80] for r in combined}
-        for item in web_results:
-            if len(combined) >= limit:
-                break
-            key = item.get("raw_text", "")[:80]
-            if key and key not in existing_texts:
-                existing_texts.add(key)
-                combined.append(item)
+        n_active = len(source_lists) or 1
+        base_quota = limit // n_active
+        remainder = limit % n_active
+
+        taken = {}
+        leftover = {}
+        for i, (src, items) in enumerate(source_lists.items()):
+            quota = base_quota + (1 if i < remainder else 0)
+            taken[src] = items[:quota]
+            leftover[src] = items[quota:]
+
+        shortfall = limit - sum(len(v) for v in taken.values())
+        if shortfall > 0:
+            for src in source_lists:
+                if shortfall <= 0:
+                    break
+                extra = leftover[src][:shortfall]
+                taken[src].extend(extra)
+                shortfall -= len(extra)
+
+        # Interleave round-robin supaya hasil akhir benar-benar tercampur
+        # (bukan tiga blok berurutan) — penting juga untuk konsumen hilir yang
+        # hanya preview N baris pertama (mis. app.py `results[:100]`).
+        combined = []
+        existing_texts = set()
+        max_len = max((len(v) for v in taken.values()), default=0)
+        for i in range(max_len):
+            for src in source_lists:
+                if i < len(taken[src]):
+                    item = taken[src][i]
+                    key = item.get("raw_text", "")[:80]
+                    if key and key in existing_texts:
+                        continue
+                    if key:
+                        existing_texts.add(key)
+                    combined.append(item)
 
         combined = combined[:limit]
 
         logger.info(
             f"Total gabungan: {len(combined)} "
-            f"(Twitter: {len(twitter_results)}, Web: {len(web_results)}, Threads: {len(threads_results)})"
+            f"(Twitter: {len(taken.get('twitter', []))}/{len(twitter_results)}, "
+            f"Web: {len(taken.get('web', []))}/{len(web_results)}, "
+            f"Threads: {len(taken.get('threads', []))}/{len(threads_results)})"
         )
 
         return jsonify({
-            "status":        "success",
-            "keyword":       keyword,
+            "status":           "success",
+            "keyword":          keyword,
+            "expanded_keyword": expanded_keyword,
+            "plain_keyword":    plain_keyword,
+            "expansion_status": expansion_status,
             "count":         len(combined),
             "total_results": len(combined),
             "twitter_count": len(twitter_results),
@@ -222,12 +347,36 @@ def scrape():
             "data":          combined,
         })
 
+    except TimeoutError:
+        logger.error(
+            f"Scraping timeout setelah {_SCRAPE_COROUTINE_TIMEOUT}s — "
+            f"kemungkinan besar days_back/limit terlalu besar untuk windowed scraping. "
+            f"Coba turunkan days_back atau naikkan SCRAPE_COROUTINE_TIMEOUT."
+        )
+        return jsonify({
+            "status": "error",
+            "message": f"Scraping melebihi batas waktu {_SCRAPE_COROUTINE_TIMEOUT}s",
+        }), 504
+
     except Exception as e:
         logger.error(f"Scraping error: {e}", exc_info=True)
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
 if __name__ == "__main__":
+    from query_expansion import log_startup_status
+    log_startup_status()
+
     print("Starting SentimenS Scraper API on port 8000...")
     print("Twitter + Web berjalan PARALEL untuk hasil maksimal.")
+
+    # Warm up: launch Chromium sekali sekarang, bukan di request /scrape pertama.
+    browser_manager.ensure_started()
+    try:
+        browser_manager.run_coroutine(browser_manager.get_browser(), timeout=60)
+        logger.info("Browser bersama siap (warm start).")
+    except Exception as e:
+        logger.warning(f"Gagal warm-start browser (akan dicoba lagi saat request pertama): {e}")
+    atexit.register(browser_manager.shutdown)
+
     app.run(host="127.0.0.1", port=8000, debug=False, threaded=True)

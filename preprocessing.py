@@ -5,6 +5,13 @@
 import re
 import unicodedata
 
+_RE_URL_HTTP   = re.compile(r"https?://\S+")
+_RE_URL_WWW    = re.compile(r"www\.\S+")
+_RE_MENTION    = re.compile(r"@\w+")
+_RE_HASHTAG    = re.compile(r"#(\w+)")
+_RE_NON_ALNUM  = re.compile(r"[^a-zA-Z0-9\s]")
+_RE_WHITESPACE = re.compile(r"\s+")
+
 
 def remove_urls(text: str) -> str:
     """
@@ -12,9 +19,9 @@ def remove_urls(text: str) -> str:
     Menghapus http://, https://, www., dan URL tanpa prefix.
     """
     # Hapus URL dengan protokol http/https
-    text = re.sub(r"https?://\S+", "", text)
+    text = _RE_URL_HTTP.sub("", text)
     # Hapus URL dengan www.
-    text = re.sub(r"www\.\S+", "", text)
+    text = _RE_URL_WWW.sub("", text)
     return text
 
 
@@ -22,7 +29,7 @@ def remove_mentions(text: str) -> str:
     """
     FR-PP-02: Hapus mention pengguna (@username).
     """
-    text = re.sub(r"@\w+", "", text)
+    text = _RE_MENTION.sub("", text)
     return text
 
 
@@ -31,7 +38,7 @@ def remove_hashtag_symbol(text: str) -> str:
     FR-PP-02: Hapus simbol # namun pertahankan kata di belakangnya.
     Contoh: #BanggaIndonesia → BanggaIndonesia
     """
-    text = re.sub(r"#(\w+)", r"\1", text)
+    text = _RE_HASHTAG.sub(r"\1", text)
     return text
 
 
@@ -43,7 +50,7 @@ def remove_special_characters(text: str) -> str:
     # Normalisasi karakter unicode (tangani emoji, karakter khusus)
     text = unicodedata.normalize("NFKD", text)
     # Hapus semua karakter selain huruf, angka, dan spasi
-    text = re.sub(r"[^a-zA-Z0-9\s]", " ", text)
+    text = _RE_NON_ALNUM.sub(" ", text)
     return text
 
 
@@ -59,7 +66,7 @@ def normalize_whitespace(text: str) -> str:
     FR-PP-05: Normalisasi spasi berlebih dan leading/trailing whitespace.
     """
     # Ganti multiple spasi dengan satu spasi
-    text = re.sub(r"\s+", " ", text)
+    text = _RE_WHITESPACE.sub(" ", text)
     return text.strip()
 
 

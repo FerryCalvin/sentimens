@@ -11,7 +11,6 @@ Pipeline (semua PARALEL):
 Tidak ada masalah execution context karena requests dipisah dari Playwright.
 """
 import asyncio
-import os
 import uuid
 import logging
 import random
@@ -22,7 +21,7 @@ import warnings
 from typing import List
 from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 
 import requests
 from bs4 import BeautifulSoup
@@ -85,12 +84,11 @@ def _clean(s: str) -> str:
 # ─────────────────────────────────────────────────────────────
 # 1. Google News RSS (PALING RELIABLE — data XML murni)
 # ─────────────────────────────────────────────────────────────
-def _google_news_rss(keyword: str, limit: int, days_back: int = 7) -> List[dict]:
-    """Google News RSS feed — tidak perlu scraping, murni XML."""
+def _google_news_rss_window(keyword: str, limit: int, after_date: str, before_date: str) -> List[dict]:
+    """Ambil 1 window tanggal dari Google News RSS (after:/before:)."""
     results = []
-    query      = urllib.parse.quote_plus(keyword)
-    after_date = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
-    url = f"https://news.google.com/rss/search?q={query}+after:{after_date}&hl=id&gl=ID&ceid=ID:id"
+    query = urllib.parse.quote_plus(keyword)
+    url = f"https://news.google.com/rss/search?q={query}+after:{after_date}+before:{before_date}&hl=id&gl=ID&ceid=ID:id"
 
     try:
         r = requests.get(url, headers=_h(), timeout=TIMEOUT, verify=False)
@@ -127,9 +125,38 @@ def _google_news_rss(keyword: str, limit: int, days_back: int = 7) -> List[dict]
             })
 
     except Exception as e:
-        logger.warning(f"Google News RSS: {e}")
+        logger.warning(f"Google News RSS ({after_date}..{before_date}): {e}")
 
     return results
+
+
+def _google_news_rss(keyword: str, limit: int, days_back: int = 7) -> List[dict]:
+    """
+    Google News RSS feed — tidak perlu scraping, murni XML. Untuk `days_back` besar,
+    dipecah jadi beberapa window (after:/before:) supaya cakupan historis nyata,
+    bukan cuma hasil ter-baru dari satu query rentang lebar.
+    """
+    from date_buckets import build_date_buckets
+
+    buckets = build_date_buckets(days_back)
+    per_bucket_limit = max(5, limit // len(buckets))
+    results: List[dict] = []
+    seen_links: set = set()
+
+    for after_date, until_date in buckets:
+        if len(results) >= limit:
+            break
+        # `before:` di Google News bersifat eksklusif — geser +1 hari dari "until" bucket
+        # supaya hari terakhir bucket (termasuk hari ini untuk bucket terbaru) tetap tercakup.
+        before_date = (datetime.strptime(until_date, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+        for item in _google_news_rss_window(keyword, per_bucket_limit, after_date, before_date):
+            link = item.get("url", "")
+            if link and link in seen_links:
+                continue
+            seen_links.add(link)
+            results.append(item)
+
+    return results[:limit]
 
 
 # ─────────────────────────────────────────────────────────────
@@ -285,58 +312,42 @@ def _kompas(keyword: str, limit: int) -> List[dict]:
 # 5. Bing via Playwright (JS-rendered, sebagai fallback)
 # ─────────────────────────────────────────────────────────────
 async def _bing_playwright(keyword: str, limit: int) -> List[dict]:
-    """Bing via Playwright — untuk konten yang butuh JavaScript."""
-    from playwright.async_api import async_playwright
+    """Bing via Playwright (browser bersama dari browser_manager) — untuk konten yang butuh JavaScript."""
+    from browser_manager import manager as browser_manager
 
     results = []
     query = urllib.parse.quote_plus(keyword)
     url   = f"https://www.bing.com/search?q={query}&setlang=id&cc=ID&count=30"
     existing = set()
 
-    _CHROME_PATHS = [
-        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Google", "Chrome", "Application", "chrome.exe"),
-    ]
-    chrome_path = next((p for p in _CHROME_PATHS if __import__("pathlib").Path(p).exists()), None)
-    if not chrome_path:
-        return []
+    ctx = await browser_manager.new_context(locale="id-ID")
+    try:
+        page = await ctx.new_page()
+        await page.goto(url, wait_until="domcontentloaded", timeout=25_000)
+        await asyncio.sleep(3)
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            executable_path=chrome_path,
-            headless=True,
-            args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
-        )
-        try:
-            ctx  = await browser.new_context(locale="id-ID")
-            page = await ctx.new_page()
-            await page.goto(url, wait_until="domcontentloaded", timeout=25_000)
-            await asyncio.sleep(3)
-
-            # Coba berbagai selector Bing
-            for sel in ["li.b_algo", "#b_results > li", "ol#b_results li"]:
-                items = await page.query_selector_all(sel)
-                for el in items:
-                    if len(results) >= limit:
-                        break
-                    try:
-                        text = (await el.inner_text()).strip()
-                        lines = [l.strip() for l in text.split("\n") if len(l.strip()) > 20]
-                        for line in lines[:2]:
-                            if line not in existing:
-                                existing.add(line)
-                                results.append(_item(line, "bing", url))
-                    except Exception:
-                        continue
-                if results:
+        # Coba berbagai selector Bing
+        for sel in ["li.b_algo", "#b_results > li", "ol#b_results li"]:
+            items = await page.query_selector_all(sel)
+            for el in items:
+                if len(results) >= limit:
                     break
+                try:
+                    text = (await el.inner_text()).strip()
+                    lines = [l.strip() for l in text.split("\n") if len(l.strip()) > 20]
+                    for line in lines[:2]:
+                        if line not in existing:
+                            existing.add(line)
+                            results.append(_item(line, "bing", url))
+                except Exception:
+                    continue
+            if results:
+                break
 
-            await ctx.close()
-        except Exception as e:
-            logger.warning(f"Bing Playwright: {e}")
-        finally:
-            await browser.close()
+    except Exception as e:
+        logger.warning(f"Bing Playwright: {e}")
+    finally:
+        await ctx.close()
 
     return results
 
@@ -359,13 +370,14 @@ async def scrape_web_search(keyword: str, limit: int, days_back: int = 7) -> Lis
 
     def _run_sync_scrapers() -> List[dict]:
         results: List[dict] = []
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            futures = {
-                executor.submit(_google_news_rss, keyword, per_src, days_back): "google_news",
-                executor.submit(_yahoo,           keyword, per_src): "yahoo",
-                executor.submit(_detik,           keyword, per_src): "detik",
-                executor.submit(_kompas,          keyword, per_src): "kompas",
-            }
+        executor = ThreadPoolExecutor(max_workers=4)
+        futures = {
+            executor.submit(_google_news_rss, keyword, per_src, days_back): "google_news",
+            executor.submit(_yahoo,           keyword, per_src): "yahoo",
+            executor.submit(_detik,           keyword, per_src): "detik",
+            executor.submit(_kompas,          keyword, per_src): "kompas",
+        }
+        try:
             for future in as_completed(futures, timeout=35):
                 src = futures[future]
                 try:
@@ -374,6 +386,22 @@ async def scrape_web_search(keyword: str, limit: int, days_back: int = 7) -> Lis
                     results.extend(res)
                 except Exception as e:
                     logger.warning(f"  {src} error: {e}")
+        except FuturesTimeoutError:
+            # Budget 35s terlampaui — salvage sumber yang sudah selesai alih-alih
+            # membuang semuanya. Yang belum selesai dianggap hilang (tidak bisa
+            # di-cancel paksa, tapi tiap scraper sudah self-bound via requests timeout).
+            for f, src in futures.items():
+                if f.done():
+                    try:
+                        res = f.result()
+                        results.extend(res)
+                        logger.info(f"  {src}: {len(res)} hasil (salvaged setelah budget 35s)")
+                    except Exception as e:
+                        logger.warning(f"  {src} error (salvaged): {e}")
+                else:
+                    logger.warning(f"  {src}: masih jalan setelah budget 35s — hasil dibuang")
+        finally:
+            executor.shutdown(wait=False)
         return results
 
     # Run blocking I/O in a thread so the event loop stays free
