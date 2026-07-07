@@ -284,7 +284,7 @@
     </div>
 
     <!-- Entrance Hero Section -->
-    <section id="hero" class="min-h-screen w-full flex flex-col justify-center items-center relative pt-16 px-6 border-b border-outline-opaque text-center overflow-hidden">
+    <section id="hero" class="min-h-screen w-full flex flex-col justify-center items-center relative pt-16 pb-24 px-6 border-b border-outline-opaque text-center overflow-hidden">
         <div class="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(214,227,255,0.06)_0%,transparent_70%)] pointer-events-none"></div>
         
         <div class="max-w-[900px] flex flex-col items-center gap-6 relative z-10">
@@ -450,7 +450,7 @@
                     <p>
                         Mega-dataset gabungan berjumlah <strong>21.762 baris</strong> dikonstruksi dari 4 rumpun bahasa yang saling melengkapi:
                     </p>
-                    <ul class="list-disc pl-5 space-y-1.5 text-xs text-on-surface-variant">
+                    <ul class="list-disc pl-5 space-y-2 text-lg text-on-surface-variant">
                         <li><strong>IndoNLU (SmSA):</strong> 12.760 baris data (domain formal dan semi-formal).</li>
                         <li><strong>NusaX (Jawa + Sunda):</strong> 2.000 baris data (melatih model menangani fenomena <em>code-mixing</em> daerah).</li>
                         <li><strong>Ulasan Spotify (Kaggle):</strong> 4.002 baris data setelah random stratified sampling (campuran informal &amp; slang).</li>
@@ -459,7 +459,7 @@
                     <p>
                         <strong>Validasi Pakar:</strong> Bapak Nuri Hermawan, S.Hum., M.Hum. meninjau 200 sampel acak secara <em>blind review</em>. Pakar merevisi 8 label (4%) yang didominasi kasus batas (teks saran/permintaan yang dideteksi negatif oleh aturan pemetaan sederhana namun secara pragmatik bernada netral).
                     </p>
-                    <p class="text-xs border-l-2 border-primary pl-4 text-on-surface">
+                    <p class="text-lg border-l-2 border-primary pl-4 text-on-surface">
                         Evaluasi ini menghasilkan skor <strong>Cohen's Kappa &kappa; = 0,9373</strong> (Almost Perfect Agreement). Penambahan data CNBC menyeimbangkan data dengan meningkatkan proporsi kelas Netral dari 11,6% menjadi 23,88%.
                     </p>
                 </div>
@@ -530,7 +530,7 @@
                     <p>
                         <strong>Analisis Kinerja per Kelas:</strong>
                     </p>
-                    <ul class="list-disc pl-5 space-y-1.5 text-xs text-on-surface-variant">
+                    <ul class="list-disc pl-5 space-y-2 text-lg text-on-surface-variant">
                         <li><strong>Positif (2):</strong> F1-Score 93,69% (Precision 93,58%, Recall 93,79%). Performa tertinggi didukung representasi data terbesar dan struktur bahasa positif yang mudah dideteksi.</li>
                         <li><strong>Negatif (0):</strong> F1-Score 90,88% (Precision 92,32%, Recall 89,49%). Tingginya recall negatif sangat krusial dalam konteks pemantauan krisis/isu publik.</li>
                         <li><strong>Netral (1):</strong> F1-Score 89,14% (Precision 87,41%, Recall 90,94%). <strong>Melonjak +15,36 poin</strong> dibanding model awal pra-CNBC (73,78%), membuktikan keampuhan domain adaptation.</li>
@@ -570,10 +570,10 @@
                     <p>
                         Sistem diintegrasikan menggunakan arsitektur <strong>Two-Service Microservices</strong> berbasis Python untuk memisahkan tanggung jawab (Separation of Concerns):
                     </p>
-                    <ul class="list-disc pl-5 space-y-2 text-lg text-on-surface-variant">
+                    <ul class="list-disc pl-5 space-y-3 text-lg text-on-surface-variant">
                         <li><strong>Layanan Utama (Flask - Port 5000):</strong> Merender antarmuka pengguna (Single Page Application), mengelola route REST API, dan memuat model IndoBERT ke RAM secara persisten (<em>Persistent Model Loading</em>) untuk menghindari overhead pemuatan file model 500MB di setiap request.</li>
                         <li><strong>Layanan Scraper (FastAPI - Port 8000):</strong> Menjalankan Playwright dalam event loop asinkron murni untuk penarikan data paralel tanpa memblokir thread pelayanan web utama Flask. Komunikasi antar layanan menggunakan client <strong>HTTPX</strong>.</li>
-                        <li><strong>Query Expansion:</strong> Mengintegrasikan LLM API (OpenRouter) untuk memperluas kata kunci pencarian menjadi kueri boolean (OR) guna menangani ejaan gaul/informal.</li>
+                        <li><strong>Alur Kerja Asinkron:</strong> Pengguna memasukkan kata kunci &rarr; Job ID dibuat (status: <em>queued</em>) &rarr; respons instan (&lt;1 detik) &rarr; Playwright scraping + preprocessing + inferensi model berjalan asinkron di latar belakang (FastAPI &amp; Flask) &rarr; klien melakukan polling AJAX per 2 detik &rarr; dashboard otomatis merender hasil visualisasi setelah status <em>completed</em>.</li>
                     </ul>
                 </div>
             </div>
@@ -593,7 +593,7 @@
                     <p>
                         Pengujian didasarkan pada target PRD yang meliputi:
                     </p>
-                    <ul class="list-disc pl-5 space-y-1.5 text-xs text-on-surface-variant">
+                    <ul class="list-disc pl-5 space-y-2 text-lg text-on-surface-variant">
                         <li><strong>Analisis Teks Tunggal:</strong> TC-A01 s.d TC-A03 sukses mendeteksi 3 kelas sentimen; TC-A04 sukses memproses slang gaul; TC-A09 sukses melakukan sanitasi XSS (mencegah injeksi tag script).</li>
                         <li><strong>Analisis Batch CSV:</strong> TC-B01 s.d TC-B06 sukses memproses upload, menolak format selain CSV, auto-detect kolom teks, dan mengunduh laporan.</li>
                         <li><strong>Live Scraping &amp; Polling:</strong> TC-C01 s.d TC-C07 sukses melakukan scraping asinkron, polling AJAX per 2 detik, filter periodik data, dan penanganan error server down.</li>
@@ -612,19 +612,19 @@
                     <span class="text-xs font-mono text-on-surface-variant uppercase">Akhir</span>
                 </div>
                 <h2 class="text-3xl lg:text-4xl font-bold tracking-tight text-on-surface mb-6">Kesimpulan &amp; Saran</h2>
-                <div class="space-y-4 text-on-surface-variant text-sm">
+                <div class="space-y-4 text-on-surface-variant text-base">
                     <div class="bg-surface-container/40 p-4 rounded border border-outline-opaque space-y-2">
-                        <strong class="text-on-surface block font-mono text-xs uppercase tracking-wider">Kesimpulan Utama</strong>
-                        <ul class="list-disc pl-5 space-y-1.5 text-xs">
+                        <strong class="text-on-surface block font-mono text-sm uppercase tracking-wider">Kesimpulan Utama</strong>
+                        <ul class="list-disc pl-5 space-y-2 text-base text-on-surface-variant">
                             <li>Model IndoBERT multi-domain mencapai akurasi global 91,62% (melampaui target PRD &ge;80% sebesar +11,62 poin) dengan generalization gap sangat kecil (1,03%).</li>
-                            <li>Penambahan domain CNBC dan dynamic class weighting melipatgandakan performa kelas Netral (+15,36%).</li>
+                            <li>Penambahan domain CNBC and dynamic class weighting melipatgandakan performa kelas Netral (+15,36%).</li>
                             <li>Sistem dual-service Flask-FastAPI berhasil diimplementasikan secara asinkron dan lulus uji Black Box 100%.</li>
                             <li>Verifikasi anotasi mega-dataset oleh pakar menunjukkan validitas yang sangat tinggi (kappa = 0,9373).</li>
                         </ul>
                     </div>
                     <div class="bg-surface-container/40 p-4 rounded border border-outline-opaque space-y-2">
-                        <strong class="text-on-surface block font-mono text-xs uppercase tracking-wider">Saran Penelitian Lanjutan</strong>
-                        <ul class="list-disc pl-5 space-y-1.5 text-xs">
+                        <strong class="text-on-surface block font-mono text-sm uppercase tracking-wider">Saran Penelitian Lanjutan</strong>
+                        <ul class="list-disc pl-5 space-y-2 text-base text-on-surface-variant">
                             <li>Menerapkan teknik <em>label smoothing</em> (&epsilon; = 0,1) untuk mengurangi overconfidence model.</li>
                             <li>Melakukan studi ablasi yang membandingkan performa model IndoBERT Base dengan IndoBERTweet pada dataset multi-domain yang sama.</li>
                             <li>Migrasi in-memory job store ke sistem database persisten (SQLite/Redis) dan Celery untuk skenario multi-user berskala produksi.</li>
@@ -677,17 +677,24 @@
                             
                             <!-- SVG lines for flows -->
                             <svg class="w-full h-24 stroke-primary/30 stroke-[1.5] fill-none" viewBox="0 0 200 90">
-                                <path d="M 25,0 L 25,20 L 100,50" />
-                                <path d="M 75,0 L 75,25 L 100,50" />
-                                <path d="M 125,0 L 125,25 L 100,50" />
-                                <path d="M 175,0 L 175,20 L 100,50" />
-                                <line x1="100" y1="50" x2="100" y2="90" class="stroke-primary stroke-2" />
+                                <path d="M 25,0 L 25,20 L 100,50 L 100,90" />
+                                <path d="M 75,0 L 75,25 L 100,50 L 100,90" />
+                                <path d="M 125,0 L 125,25 L 100,50 L 100,90" />
+                                <path d="M 175,0 L 175,20 L 100,50 L 100,90" />
                                 
-                                <!-- Flows particles -->
-                                <circle cx="25" cy="10" r="3" fill="#d6e3ff" class="flow-particle" style="animation-delay: 0s" />
-                                <circle cx="75" cy="10" r="3" fill="#d6e3ff" class="flow-particle" style="animation-delay: 0.8s" />
-                                <circle cx="125" cy="10" r="3" fill="#d6e3ff" class="flow-particle" style="animation-delay: 1.5s" />
-                                <circle cx="175" cy="10" r="3" fill="#d6e3ff" class="flow-particle" style="animation-delay: 0.3s" />
+                                <!-- Flows particles using native animateMotion following the paths exactly -->
+                                <circle r="3.5" fill="#d6e3ff">
+                                    <animateMotion dur="2.5s" repeatCount="indefinite" path="M 25,0 L 25,20 L 100,50 L 100,90" begin="0s" />
+                                </circle>
+                                <circle r="3.5" fill="#d6e3ff">
+                                    <animateMotion dur="2.5s" repeatCount="indefinite" path="M 75,0 L 75,25 L 100,50 L 100,90" begin="0.6s" />
+                                </circle>
+                                <circle r="3.5" fill="#d6e3ff">
+                                    <animateMotion dur="2.5s" repeatCount="indefinite" path="M 125,0 L 125,25 L 100,50 L 100,90" begin="1.2s" />
+                                </circle>
+                                <circle r="3.5" fill="#d6e3ff">
+                                    <animateMotion dur="2.5s" repeatCount="indefinite" path="M 175,0 L 175,20 L 100,50 L 100,90" begin="1.8s" />
+                                </circle>
                             </svg>
                             
                             <!-- Model Target -->
@@ -755,11 +762,12 @@
 
                 <!-- 6. Hasil Data Viz -->
                 <div class="viz-panel" id="viz-pengumpulan-data">
-                    <div class="glass-panel p-6 rounded-lg w-full max-w-[420px] flex flex-col gap-4">
-                        <span class="text-xs font-mono text-primary-dim uppercase tracking-wider block text-center">Dataset Composition &amp; Agreement</span>
+                    <div class="glass-panel p-5 rounded-xl w-full max-w-[420px] flex flex-col gap-4 relative overflow-hidden border-t-2 border-t-primary/50 shadow-[0_8px_32px_rgba(214,227,255,0.05)]">
+                        <div class="absolute inset-0 bg-gradient-to-br from-primary/10 to-transparent opacity-50 pointer-events-none"></div>
+                        <span class="text-xs font-mono text-primary-dim uppercase tracking-wider block text-center relative z-10">Dataset Composition</span>
                         
                         <!-- Donut Bar Representation -->
-                        <div class="space-y-1.5 w-full">
+                        <div class="space-y-1.5 w-full relative z-10">
                             <span class="text-xs font-mono text-on-surface-variant block">Total Data Latih: 21.762</span>
                             <div class="w-full h-6 rounded overflow-hidden flex border border-outline-opaque font-mono text-[9px] font-bold text-surface-dim">
                                 <div class="bg-primary flex items-center justify-center" style="width: 58.6%" title="IndoNLU: 12.760">IndoNLU</div>
@@ -768,15 +776,34 @@
                                 <div class="bg-[#8f9097] flex items-center justify-center border-l border-surface" style="width: 13.8%" title="CNBC: 3.000">CNBC</div>
                             </div>
                         </div>
-                        
-                        <!-- Kappa badge -->
-                        <div class="flex items-center justify-between bg-surface p-3 rounded border border-outline-opaque w-full mt-2">
-                            <div>
-                                <span class="text-[10px] font-mono text-on-surface-variant block uppercase">Cohen's Kappa (&kappa;)</span>
-                                <strong class="text-2xl font-mono text-positif leading-none">0,9373</strong>
+
+                        <!-- Animated Cohen's Kappa Solver -->
+                        <div class="space-y-2 w-full mt-1 border-t border-outline-opaque pt-3 relative z-10">
+                            <span class="text-[10px] font-mono text-primary-dim uppercase tracking-wider block text-center">Cohen's Kappa (κ) Calculation</span>
+                            
+                            <div class="flex flex-col gap-1.5 font-mono text-[9px] text-on-surface-variant">
+                                <div class="bg-surface/80 p-2 rounded border border-outline-opaque transition-all duration-500" id="kappa-step-1">
+                                    <span class="block text-primary font-semibold">1. Observed Agreement (Po)</span>
+                                    <span class="text-xs text-on-surface font-bold">(78 + 35 + 79) / 200 = 0,9600</span>
+                                </div>
+                                <div class="bg-surface/80 p-2 rounded border border-outline-opaque transition-all duration-500" id="kappa-step-2">
+                                    <span class="block text-primary font-semibold">2. Expected Agreement (Pe)</span>
+                                    <span class="text-xs text-on-surface font-bold">0,1658 + 0,0368 + 0,1600 = 0,3625</span>
+                                </div>
+                                <div class="bg-surface/80 p-2 rounded border border-outline-opaque transition-all duration-500" id="kappa-step-3">
+                                    <span class="block text-primary font-semibold">3. Kappa Formula</span>
+                                    <span class="text-[10px] text-on-surface font-bold">&kappa; = (Po - Pe) / (1 - Pe)</span>
+                                </div>
                             </div>
-                            <div class="bg-positif/10 border border-positif/20 text-positif text-[10px] font-mono px-3 py-1 rounded">
-                                Almost Perfect Agreement
+                            
+                            <div class="flex items-center justify-between bg-surface p-3 rounded-lg border border-outline-opaque w-full mt-2 transition-all duration-500" id="kappa-final-box">
+                                <div>
+                                    <span class="text-[9px] font-mono text-on-surface-variant block uppercase leading-none">Kappa Score</span>
+                                    <strong class="text-2xl font-mono text-positif leading-none">0,9373</strong>
+                                </div>
+                                <div class="bg-positif/10 border border-positif/20 text-positif text-[10px] font-mono px-3 py-1 rounded">
+                                    Almost Perfect
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -975,34 +1002,27 @@
 
                 <!-- 12. Pengujian Sistem Viz -->
                 <div class="viz-panel" id="viz-pengujian-fungsional">
-                    <div class="glass-panel p-6 rounded-xl w-full max-w-[420px] flex flex-col gap-5 relative overflow-hidden border-t-2 border-t-[#c6a0f6]/50 shadow-[0_8px_32px_rgba(198,160,246,0.05)]">
+                    <div class="glass-panel p-6 rounded-xl w-full max-w-[420px] flex flex-col gap-4 relative overflow-hidden border-t-2 border-t-[#c6a0f6]/50 shadow-[0_8px_32px_rgba(198,160,246,0.05)]">
                         <div class="absolute inset-0 bg-gradient-to-br from-[#c6a0f6]/10 to-transparent opacity-50 pointer-events-none"></div>
-                        <span class="text-xs font-mono text-primary-dim uppercase tracking-wider block text-center relative z-10">System Assessment (BlackBox &amp; MOS)</span>
+                        <span class="text-xs font-mono text-primary-dim uppercase tracking-wider block text-center relative z-10">Pengujian Fungsional Sistem</span>
                         
-                        <div class="flex items-center gap-4 relative z-10 w-full justify-between bg-surface/60 p-3 rounded-lg border border-[#c6a0f6]/20 shadow-inner">
-                            <div>
-                                <span class="text-[10px] font-mono text-on-surface-variant uppercase block">Mean Opinion Score</span>
-                                <strong class="text-3xl font-mono text-[#c6a0f6] leading-none">3,98</strong>
+                        <div class="grid grid-cols-3 gap-2 w-full text-center relative z-10 font-mono text-[10px]">
+                            <div class="p-3 bg-surface/80 rounded-lg border border-[#4ade80]/30 flex flex-col justify-center items-center shadow-sm">
+                                <strong class="text-xl font-bold text-positif block">25/25</strong>
+                                <span class="text-[8px] font-mono text-on-surface-variant uppercase mt-1">Test Case Pass</span>
                             </div>
-                            <div class="bg-[#c6a0f6]/10 border border-[#c6a0f6]/30 text-[#c6a0f6] text-xs font-mono px-3 py-1.5 rounded flex items-center gap-1.5">
-                                <span class="material-symbols-outlined text-[16px]">thumb_up</span>
-                                Kategori Baik
+                            <div class="p-3 bg-surface/80 rounded-lg border border-[#4ade80]/30 flex flex-col justify-center items-center shadow-sm">
+                                <strong class="text-xl font-bold text-positif block">8/8</strong>
+                                <span class="text-[8px] font-mono text-on-surface-variant uppercase mt-1">Success Metrics</span>
                             </div>
-                        </div>
-
-                        <div class="grid grid-cols-2 gap-3 w-full text-center relative z-10">
-                            <div class="p-3 bg-surface/80 rounded-lg border border-outline-opaque hover:border-[#4ade80]/50 transition-colors flex flex-col justify-center items-center shadow-sm">
-                                <strong class="text-2xl font-mono text-positif block">62</strong>
-                                <span class="text-[9px] font-mono text-on-surface-variant uppercase mt-1">Skenario Uji BlackBox</span>
-                            </div>
-                            <div class="p-3 bg-surface/80 rounded-lg border border-outline-opaque hover:border-[#4ade80]/50 transition-colors flex flex-col justify-center items-center shadow-sm">
-                                <strong class="text-2xl font-mono text-positif block">100%</strong>
-                                <span class="text-[9px] font-mono text-on-surface-variant uppercase mt-1">Tingkat Keberhasilan</span>
+                            <div class="p-3 bg-surface/80 rounded-lg border border-[#4ade80]/30 flex flex-col justify-center items-center shadow-sm">
+                                <strong class="text-xl font-bold text-positif block">10/10</strong>
+                                <span class="text-[8px] font-mono text-on-surface-variant uppercase mt-1">NFR Met</span>
                             </div>
                         </div>
                         
                         <div class="w-full bg-positif/10 border border-positif/20 text-positif text-xs p-3 rounded-lg font-mono text-center relative z-10">
-                            Sistem Web Dinyatakan Layak &amp; Lulus Uji
+                            Tidak ditemukan satupun skenario FAIL. Seluruh komponen berjalan sesuai spesifikasi.
                         </div>
                     </div>
                 </div>
@@ -1061,7 +1081,7 @@
 
     <!-- Scroll & Viz Controller Logic -->
     <script>
-        document.addEventListener("DOMContentLoaded", () => {
+        const runInit = () => {
             const sections = document.querySelectorAll('.scroll-section');
             const panels = document.querySelectorAll('.viz-panel');
             const navDots = document.querySelectorAll('.nav-dot');
@@ -1179,18 +1199,40 @@
                 }
             });
 
+            // Counting animation for hero stats
+            const animateValue = (id, start, end, duration, formatFn) => {
+                const obj = document.getElementById(id);
+                if (!obj) return;
+                let startTimestamp = null;
+                const step = (timestamp) => {
+                    if (!startTimestamp) startTimestamp = timestamp;
+                    const progress = Math.min((timestamp - startTimestamp) / duration, 1);
+                    const val = progress * (end - start) + start;
+                    obj.innerHTML = formatFn(val);
+                    if (progress < 1) {
+                        window.requestAnimationFrame(step);
+                    }
+                };
+                window.requestAnimationFrame(step);
+            };
+
+            setTimeout(() => {
+                animateValue('stat-dataset', 0, 21762, 1500, (v) => Math.floor(v).toLocaleString('id-ID'));
+                animateValue('stat-accuracy', 0, 91.62, 1500, (v) => v.toFixed(2).replace('.', ',') + '%');
+                animateValue('stat-domains', 0, 4, 1000, (v) => Math.floor(v));
+                animateValue('stat-cases', 0, 25, 1200, (v) => Math.floor(v) + ' / 25');
+            }, 500);
+
             // 5. Step-specific JS Animations/Triggers
             function triggerStepAnimation(vizId) {
                 // Metodologi step highlight
                 if (vizId === 'viz-metodologi') {
-                    // Reset steps
                     const steps = document.querySelectorAll('#pipeline-container [data-step]');
                     steps.forEach(s => {
                         s.classList.remove('bg-primary/20', 'border-primary/50', 'text-primary');
                         s.querySelector('span:last-child').textContent = 'circle';
                     });
                     
-                    // Progressive step highlighting simulation
                     let currentStep = 1;
                     const interval = setInterval(() => {
                         const activeStep = document.querySelector(`#pipeline-container [data-step="${currentStep}"]`);
@@ -1202,8 +1244,59 @@
                         if (currentStep > 6) clearInterval(interval);
                     }, 400);
                 }
+
+                // Cohen's Kappa Step Animation
+                if (vizId === 'viz-pengumpulan-data') {
+                    const step1 = document.getElementById('kappa-step-1');
+                    const step2 = document.getElementById('kappa-step-2');
+                    const step3 = document.getElementById('kappa-step-3');
+                    const finalBox = document.getElementById('kappa-final-box');
+                    
+                    [step1, step2, step3, finalBox].forEach(el => {
+                        if (el) {
+                            el.style.opacity = '0.2';
+                            el.style.transform = 'scale(0.95)';
+                            el.classList.remove('border-primary/50', 'bg-primary/5', 'border-positif/50', 'bg-positif/5');
+                        }
+                    });
+                    
+                    setTimeout(() => {
+                        if(step1) {
+                            step1.style.opacity = '1';
+                            step1.style.transform = 'scale(1)';
+                            step1.classList.add('border-primary/50', 'bg-primary/5');
+                        }
+                    }, 300);
+                    setTimeout(() => {
+                        if(step2) {
+                            step2.style.opacity = '1';
+                            step2.style.transform = 'scale(1)';
+                            step2.classList.add('border-primary/50', 'bg-primary/5');
+                        }
+                    }, 1200);
+                    setTimeout(() => {
+                        if(step3) {
+                            step3.style.opacity = '1';
+                            step3.style.transform = 'scale(1)';
+                            step3.classList.add('border-primary/50', 'bg-primary/5');
+                        }
+                    }, 2100);
+                    setTimeout(() => {
+                        if(finalBox) {
+                            finalBox.style.opacity = '1';
+                            finalBox.style.transform = 'scale(1)';
+                            finalBox.classList.add('border-positif/50', 'bg-positif/5');
+                        }
+                    }, 3000);
+                }
             }
-        });
+        };
+
+        if (document.readyState === "loading") {
+            document.addEventListener("DOMContentLoaded", runInit);
+        } else {
+            runInit();
+        }
     </script>
 </body>
 </html>
