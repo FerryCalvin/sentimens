@@ -437,6 +437,12 @@ def api_evaluate():
     return jsonify(compute_evaluation_metrics(true_labels, pred_labels))
 
 
+@app.route("/presentation", methods=["GET"])
+def presentation():
+    """Renders the interactive scrollytelling presentation page."""
+    return render_template("presentation.html")
+
+
 # Error Handlers (NFR-S-05)
 # =============================================================
 

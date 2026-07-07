@@ -1,0 +1,1199 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>Seminar Hasil Skripsi — Klasifikasi Sentimen IndoBERT Multi-Domain</title>
+    
+    <!-- Frameworks & Fonts -->
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Geist:wght@400;500;600&display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+
+    <script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "surface": "#07122a",
+              "surface-dim": "#07122a",
+              "surface-bright": "#2f3952",
+              "surface-container-lowest": "#030d25",
+              "surface-container-low": "#101b33",
+              "surface-container": "#151f37",
+              "surface-container-high": "#1f2942",
+              "surface-container-highest": "#2a344e",
+              "on-surface": "#d9e2ff",
+              "on-surface-variant": "#c5c6cd",
+              "primary": "#d6e3ff",
+              "primary-dim": "#b9c7e4",
+              "on-primary": "#233147",
+              "outline-opaque": "rgba(217, 226, 255, 0.1)",
+              "positif": "#4ade80",
+              "negatif": "#ffb4ab",
+              "netral": "#c5c6cd"
+            },
+            fontFamily: {
+              sans: ["Plus Jakarta Sans", "system-ui", "sans-serif"],
+              mono: ["Geist", "Courier New", "monospace"]
+            }
+          }
+        }
+      }
+    </script>
+
+    <style>
+        /* Scrollytelling Custom Styles */
+        body {
+            background-color: #07122a;
+            color: #d9e2ff;
+            font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+            overflow-x: hidden;
+        }
+
+        /* Ambient background glow */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background:
+                radial-gradient(ellipse 80% 60% at 10% 20%, rgba(181, 199, 228, 0.04) 0%, transparent 60%),
+                radial-gradient(ellipse 60% 80% at 90% 80%, rgba(182, 198, 237, 0.03) 0%, transparent 60%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .glass-panel {
+            background: rgba(21, 31, 55, 0.7);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(217, 226, 255, 0.08);
+        }
+
+        /* Scrolly Columns */
+        #sidecar-wrapper {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            position: relative;
+        }
+
+        @media (min-width: 1024px) {
+            #sidecar-wrapper {
+                flex-direction: row;
+            }
+        }
+
+        #text-column {
+            width: 100%;
+            padding-bottom: 20vh;
+        }
+
+        @media (min-width: 1024px) {
+            #text-column {
+                width: 50%;
+                padding-right: 2rem;
+            }
+        }
+
+        .scroll-section {
+            min-height: 85vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            padding: 4rem 1.5rem;
+            border-bottom: 1px solid rgba(217, 226, 255, 0.05);
+            transition: opacity 0.3s ease;
+        }
+
+        @media (min-width: 1024px) {
+            .scroll-section {
+                padding: 8rem 3rem;
+                min-height: 95vh;
+            }
+        }
+
+        /* Active highlight for current reading section */
+        .scroll-section.active-reading {
+            opacity: 1;
+        }
+        
+        .scroll-section:not(.active-reading) {
+            opacity: 0.25;
+        }
+
+        #viz-column {
+            width: 100%;
+            height: 50vh;
+            position: sticky;
+            top: 64px;
+            z-index: 10;
+            background: rgba(7, 18, 42, 0.95);
+            border-bottom: 1px solid rgba(217, 226, 255, 0.1);
+        }
+
+        @media (min-width: 1024px) {
+            #viz-column {
+                width: 50%;
+                height: calc(100vh - 64px);
+                top: 64px;
+                border-left: 1px solid rgba(217, 226, 255, 0.08);
+                border-bottom: none;
+                background: transparent;
+            }
+        }
+
+        #viz-sticky-container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1.5rem;
+            overflow: hidden;
+        }
+
+        .viz-panel {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.5s cubic-bezier(0.4, 0, 0.2, 1), transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+            transform: translateY(20px);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 2rem;
+        }
+
+        .viz-panel.active {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translateY(0);
+        }
+
+        /* Dot Navigation styling */
+        .nav-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: rgba(217, 226, 255, 0.2);
+            transition: all 0.3s ease;
+            position: relative;
+            cursor: pointer;
+        }
+
+        .nav-dot.active {
+            background-color: #d6e3ff;
+            box-shadow: 0 0 12px #d6e3ff;
+            transform: scale(1.3);
+        }
+
+        .nav-dot::after {
+            content: attr(data-label);
+            position: absolute;
+            right: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            background-color: #151f37;
+            color: #d9e2ff;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s ease;
+            border: 1px solid rgba(217, 226, 255, 0.1);
+        }
+
+        .nav-dot:hover::after {
+            opacity: 1;
+        }
+
+        /* Keyframe animations */
+        @keyframes pulse-glowing {
+            0%, 100% { box-shadow: 0 0 5px rgba(214, 227, 255, 0.3); }
+            50% { box-shadow: 0 0 20px rgba(214, 227, 255, 0.7); }
+        }
+
+        .glow-active {
+            animation: pulse-glowing 2s infinite;
+        }
+
+        @keyframes dataFlow {
+            0% { transform: translateY(0); opacity: 0; }
+            10% { opacity: 1; }
+            90% { opacity: 1; }
+            100% { transform: translateY(120px); opacity: 0; }
+        }
+
+        .flow-particle {
+            animation: dataFlow 3s infinite linear;
+        }
+
+        /* Progress gauge styling */
+        .gauge-svg circle {
+            transition: stroke-dashoffset 1s ease-out;
+        }
+    </style>
+</head>
+<body class="bg-surface-dim text-on-surface antialiased font-sans relative">
+    
+    <!-- Top Progress Scroll Bar -->
+    <div id="progress-bar" class="fixed top-0 left-0 h-1 bg-primary z-[100] transition-all duration-100" style="width: 0%"></div>
+
+    <!-- Main Navigation Bar -->
+    <nav class="fixed top-0 w-full h-16 z-50 bg-surface/75 backdrop-blur-xl border-b border-on-surface/10 flex items-center justify-between px-6 lg:px-12">
+        <div class="flex items-center gap-3">
+            <a href="/" class="text-on-surface-variant hover:text-on-surface flex items-center gap-1 transition-colors">
+                <span class="material-symbols-outlined text-[20px]">arrow_back</span>
+                <span class="font-mono text-[14px]">Dashboard</span>
+            </a>
+            <span class="text-on-surface/20">|</span>
+            <div class="font-display font-semibold text-[18px] tracking-tight text-on-surface flex items-center gap-2">
+                <span>Skripsi Presentation</span>
+                <span class="text-xs bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded font-mono font-medium">IndoBERT</span>
+            </div>
+        </div>
+        <div class="hidden lg:flex items-center gap-6">
+            <span class="text-xs text-on-surface-variant font-mono">Presenter: Fairnanda Kurnia Gusty</span>
+        </div>
+    </nav>
+
+    <!-- Right Side Dot Navigation (Floating) -->
+    <div class="hidden xl:flex fixed right-8 top-1/2 transform -translate-y-1/2 flex-col gap-4 z-40 bg-surface-container/60 backdrop-blur-md p-3 rounded-full border border-outline-opaque">
+        <a href="#hero" class="nav-dot active" data-label="Opening"></a>
+        <a href="#section-latar-belakang" class="nav-dot" data-label="Latar Belakang"></a>
+        <a href="#section-rumusan-tujuan" class="nav-dot" data-label="Rumusan & Tujuan"></a>
+        <a href="#section-metodologi" class="nav-dot" data-label="Metodologi"></a>
+        <a href="#section-pengumpulan-data" class="nav-dot" data-label="Hasil Data"></a>
+        <a href="#section-preprocessing-pembagian" class="nav-dot" data-label="Preprocessing"></a>
+        <a href="#section-finetuning" class="nav-dot" data-label="Fine-Tuning"></a>
+        <a href="#section-evaluasi-model" class="nav-dot" data-label="Evaluasi Model"></a>
+        <a href="#section-confusion-matrix" class="nav-dot" data-label="Confusion Matrix"></a>
+        <a href="#section-implementasi-web" class="nav-dot" data-label="Implementasi Web"></a>
+        <a href="#section-pengujian-fungsional" class="nav-dot" data-label="Pengujian Sistem"></a>
+        <a href="#section-kesimpulan-saran" class="nav-dot" data-label="Kesimpulan & Saran"></a>
+        <a href="#section-terima-kasih" class="nav-dot" data-label="Penutup"></a>
+    </div>
+
+    <!-- Entrance Hero Section -->
+    <section id="hero" class="min-h-screen w-full flex flex-col justify-center items-center relative pt-16 px-6 border-b border-outline-opaque text-center overflow-hidden">
+        <div class="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(214,227,255,0.06)_0%,transparent_70%)] pointer-events-none"></div>
+        
+        <div class="max-w-[900px] flex flex-col items-center gap-6 relative z-10">
+            <span class="text-xs lg:text-sm font-mono tracking-widest text-primary-dim uppercase border border-primary/20 px-3 py-1 rounded-full bg-primary/5">SEMINAR HASIL SKRIPSI</span>
+            
+            <h1 class="text-3xl lg:text-5xl font-bold tracking-tight text-on-surface leading-tight mt-2">
+                Sistem Klasifikasi Sentimen Teks Media Sosial Menggunakan IndoBERT dengan Strategi Multi-Domain
+            </h1>
+            
+            <p class="text-on-surface-variant text-base lg:text-lg max-w-2xl leading-relaxed">
+                Penelitian terapan untuk menguji ketangguhan model Transformer (IndoBERT) pada domain linguistik media sosial yang variatif (formal, daerah, informal, jurnalistik) dan implementasinya ke sistem web real-time.
+            </p>
+            
+            <div class="w-full h-[1px] bg-outline-opaque my-4"></div>
+            
+            <!-- Presenter Profile & Supervisors -->
+            <div class="flex flex-col md:flex-row gap-6 md:gap-16 text-left justify-center items-start md:items-center">
+                <div>
+                    <span class="text-xs font-mono uppercase text-on-surface-variant block mb-1">Oleh Peneliti</span>
+                    <strong class="text-on-surface text-base block">Fairnanda Kurnia Gusty</strong>
+                    <span class="text-sm font-mono text-primary-dim">NIM. 434221049</span>
+                </div>
+                <div class="hidden md:block w-[1px] h-10 bg-outline-opaque"></div>
+                <div>
+                    <span class="text-xs font-mono uppercase text-on-surface-variant block mb-1">Dosen Pembimbing</span>
+                    <strong class="text-on-surface text-base block">Alifian Sukma, S.Kom., M.Kom.</strong>
+                    <span class="text-xs text-on-surface-variant">NIP. 199312212022013101</span>
+                </div>
+            </div>
+            
+            <div class="text-xs text-on-surface-variant mt-4 font-mono">
+                <span class="text-primary-dim">Tim Penguji:</span> Nasa Zata Dina, Ph.D (Ketua) • Tesa Eranti Putri, S.Kom., M.Kom • Drs. Eto Wuryanto, DEA
+            </div>
+            
+            <!-- Tip for Keyboard navigation -->
+            <div class="text-[11px] bg-surface-container/50 border border-outline-opaque text-on-surface-variant px-3 py-1.5 rounded mt-4 flex items-center gap-1.5">
+                <span class="material-symbols-outlined text-[14px]">keyboard</span>
+                <span>Gunakan tombol <kbd class="font-mono bg-surface-container-high px-1 py-0.5 rounded text-on-surface font-semibold">Panah Kanan &rarr;</kbd> atau <kbd class="font-mono bg-surface-container-high px-1 py-0.5 rounded text-on-surface font-semibold">Panah Kiri &larr;</kbd> untuk navigasi halaman.</span>
+            </div>
+
+            <a href="#section-latar-belakang" class="mt-8 flex flex-col items-center gap-2 text-primary-dim hover:text-primary transition-colors group">
+                <span class="text-xs font-mono tracking-wider">Mulai Presentasi</span>
+                <span class="material-symbols-outlined text-[28px] animate-bounce">keyboard_double_arrow_down</span>
+            </a>
+        </div>
+
+        <!-- Quick Stats Overlay on Hero -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-6 md:gap-12 mt-16 max-w-5xl w-full border-t border-outline-opaque/50 pt-8 px-4 z-10">
+            <div class="text-center md:text-left">
+                <span class="text-[32px] md:text-[40px] font-bold text-on-surface leading-none block font-mono" id="stat-dataset">21.762</span>
+                <span class="text-xs font-mono uppercase text-on-surface-variant">Mega Dataset</span>
+            </div>
+            <div class="text-center md:text-left">
+                <span class="text-[32px] md:text-[40px] font-bold text-positif leading-none block font-mono" id="stat-accuracy">91,62%</span>
+                <span class="text-xs font-mono uppercase text-on-surface-variant">Akurasi Model</span>
+            </div>
+            <div class="text-center md:text-left">
+                <span class="text-[32px] md:text-[40px] font-bold text-primary leading-none block font-mono" id="stat-domains">4</span>
+                <span class="text-xs font-mono uppercase text-on-surface-variant">Domain Bahasa</span>
+            </div>
+            <div class="text-center md:text-left">
+                <span class="text-[32px] md:text-[40px] font-bold text-on-surface leading-none block font-mono" id="stat-cases">25 / 25</span>
+                <span class="text-xs font-mono uppercase text-on-surface-variant">Uji Black Box (100%)</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- Scrollytelling Sidecar Wrapper -->
+    <div id="sidecar-wrapper" class="relative max-w-container-max mx-auto px-0 lg:px-6">
+        
+        <!-- Left Column: Narrative Content -->
+        <div id="text-column" class="flex flex-col relative z-20">
+            
+            <!-- Section 1: Latar Belakang -->
+            <div class="scroll-section active-reading" id="section-latar-belakang" data-viz-id="viz-latar-belakang">
+                <div class="flex items-center gap-2 mb-2">
+                    <span class="text-xs font-mono text-primary-dim uppercase tracking-wider">Slide 2</span>
+                    <span class="text-on-surface/20">•</span>
+                    <span class="text-xs font-mono text-on-surface-variant uppercase">Latar Belakang</span>
+                </div>
+                <h2 class="text-2xl lg:text-3xl font-bold tracking-tight text-on-surface mb-6">Pemicu Penelitian &amp; Tantangan Linguistik</h2>
+                <div class="space-y-4 text-on-surface-variant text-base leading-relaxed">
+                    <p>
+                        Perkembangan teknologi digital melahirkan <strong>185,3 juta pengguna internet</strong> di Indonesia (penetrasi 66,5% populasi) dengan <strong>139 juta pengguna aktif media sosial</strong> (Slice, 2024; DataReportal, 2024). Lonjakan opini publik ini memiliki <em>high volume</em> dan <em>high variety</em>.
+                    </p>
+                    <p>
+                        Teks opini publik di media sosial didominasi oleh <strong>bahasa informal, slang, singkatan</strong>, serta <strong>campur kode (code-mixing)</strong> antar bahasa daerah. Hal ini merupakan tantangan berat bagi model klasifikasi sentimen konvensional seperti Naive Bayes dan SVM yang bertumpu pada representasi <em>Bag-of-Words</em> atau <em>TF-IDF</em> karena mengabaikan urutan kata, relasi antarkalimat, dan negasi (contoh: "tidak buruk" diartikan negatif akibat bias kata "buruk").
+                    </p>
+                    <p class="border-l-2 border-primary pl-4 text-on-surface">
+                        <strong>Masalah Domain Shift / Dataset Shift</strong> (Pan &amp; Yang, 2010): Model yang hanya dilatih pada skenario single-domain cenderung overfitting dan performanya anjlok ketika dihadapkan pada dinamika multi-domain percakapan media sosial yang tidak dapat diprediksi.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Section 2: Rumusan Masalah & Tujuan -->
+            <div class="scroll-section" id="section-rumusan-tujuan" data-viz-id="viz-rumusan-tujuan">
+                <div class="flex items-center gap-2 mb-2">
+                    <span class="text-xs font-mono text-primary-dim uppercase tracking-wider">Slide 3</span>
+                    <span class="text-on-surface/20">•</span>
+                    <span class="text-xs font-mono text-on-surface-variant uppercase">Fokus Penelitian</span>
+                </div>
+                <h2 class="text-2xl lg:text-3xl font-bold tracking-tight text-on-surface mb-6">Rumusan Masalah &amp; Tujuan</h2>
+                
+                <div class="space-y-6">
+                    <div class="bg-surface-container/40 p-4 rounded border border-outline-opaque">
+                        <h4 class="font-mono text-xs font-semibold text-primary mb-2 uppercase tracking-wider flex items-center gap-1.5">
+                            <span class="material-symbols-outlined text-[16px]">help_center</span>
+                            Rumusan Masalah
+                        </h4>
+                        <ol class="list-decimal pl-5 space-y-2 text-sm text-on-surface-variant">
+                            <li>Bagaimana mengevaluasi performa model IndoBERT yang telah di-fine-tune menggunakan strategi dataset <strong>multi-domain</strong> dalam mengklasifikasikan sentimen teks media sosial berbahasa Indonesia?</li>
+                            <li>Bagaimana merancang bangun sistem <strong>dashboard berbasis web</strong> yang mengintegrasikan model IndoBERT hasil fine-tuning multi-domain untuk menyajikan visualisasi sentimen teks secara mendekati real-time?</li>
+                        </ol>
+                    </div>
+
+                    <div class="bg-surface-container/40 p-4 rounded border border-outline-opaque">
+                        <h4 class="font-mono text-xs font-semibold text-positif mb-2 uppercase tracking-wider flex items-center gap-1.5">
+                            <span class="material-symbols-outlined text-[16px]">track_changes</span>
+                            Tujuan Penelitian
+                        </h4>
+                        <ol class="list-decimal pl-5 space-y-2 text-sm text-on-surface-variant">
+                            <li>Mengevaluasi performa model IndoBERT hasil fine-tuning multi-domain untuk mengetahui tingkat akurasi dan efektivitasnya dalam menangani karakteristik unik teks media sosial.</li>
+                            <li>Merancang dan membangun sistem aplikasi berbasis web yang mengintegrasikan model IndoBERT hasil fine-tuning untuk menyediakan visualisasi hasil analisis sentimen secara interaktif, informatif, dan mudah diakses.</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+
+
+
+            <!-- Section 5: Metodologi Penelitian -->
+            <div class="scroll-section" id="section-metodologi" data-viz-id="viz-metodologi">
+                <div class="flex items-center gap-2 mb-2">
+                    <span class="text-xs font-mono text-primary-dim uppercase tracking-wider">Slide 4</span>
+                    <span class="text-on-surface/20">•</span>
+                    <span class="text-xs font-mono text-on-surface-variant uppercase">Metodologi</span>
+                </div>
+                <h2 class="text-2xl lg:text-3xl font-bold tracking-tight text-on-surface mb-6">Alur Kerja Penelitian</h2>
+                <div class="space-y-4 text-on-surface-variant text-base leading-relaxed">
+                    <p>
+                        Penelitian eksperimental ini dirancang secara sistematis dengan tahapan prosedural yang terukur:
+                    </p>
+                    <ol class="list-decimal pl-5 space-y-2 text-sm text-on-surface">
+                        <li><strong>Pengumpulan Dataset:</strong> Akuisisi data latih multi-domain dan setup data uji kualitatif live.</li>
+                        <li><strong>Penyelarasan Label (Relabeling):</strong> Menyatukan label dari berbagai format (teks, skala numerik 0-2, bintang 1-5) menjadi skema numerik terpadu (0 = Negatif, 1 = Netral, 2 = Positif).</li>
+                        <li><strong>Validasi Pakar (Linguist Validation):</strong> Validasi acak 200 sampel oleh pakar bahasa FIB Universitas Airlangga guna meminimalkan bias subjektif sistem pada kasus batas (borderline cases).</li>
+                        <li><strong>Text Preprocessing:</strong> Pembersihan noise teks tanpa menghapus kata-kata penentu negasi (justifikasi peniadaan stopword removal).</li>
+                        <li><strong>Fine-Tuning Model:</strong> Melatih model IndoBERT Base menggunakan GPU Tesla T4 dan menangani class imbalance melalui bobot penalti dinamis.</li>
+                        <li><strong>Integrasi &amp; Evaluasi:</strong> Implementasi sistem arsitektur microservices Flask &amp; FastAPI dan evaluasi performa.</li>
+                    </ol>
+                </div>
+            </div>
+
+            <!-- Section 6: Hasil Pengumpulan & Validasi Data -->
+            <div class="scroll-section" id="section-pengumpulan-data" data-viz-id="viz-pengumpulan-data">
+                <div class="flex items-center gap-2 mb-2">
+                    <span class="text-xs font-mono text-primary-dim uppercase tracking-wider">Slide 5</span>
+                    <span class="text-on-surface/20">•</span>
+                    <span class="text-xs font-mono text-on-surface-variant uppercase">Data &amp; Validasi</span>
+                </div>
+                <h2 class="text-2xl lg:text-3xl font-bold tracking-tight text-on-surface mb-6">Komposisi Mega-Dataset &amp; Validasi Pakar</h2>
+                <div class="space-y-4 text-on-surface-variant text-base leading-relaxed">
+                    <p>
+                        Mega-dataset gabungan berjumlah <strong>21.762 baris</strong> dikonstruksi dari 4 rumpun bahasa yang saling melengkapi:
+                    </p>
+                    <ul class="list-disc pl-5 space-y-1.5 text-xs text-on-surface-variant">
+                        <li><strong>IndoNLU (SmSA):</strong> 12.760 baris data (domain formal dan semi-formal).</li>
+                        <li><strong>NusaX (Jawa + Sunda):</strong> 2.000 baris data (melatih model menangani fenomena <em>code-mixing</em> daerah).</li>
+                        <li><strong>Ulasan Spotify (Kaggle):</strong> 4.002 baris data setelah random stratified sampling (campuran informal &amp; slang).</li>
+                        <li><strong>Berita CNBC Indonesia (Kaggle):</strong> 3.000 baris data (register jurnalistik, faktual, netral-dominan).</li>
+                    </ul>
+                    <p>
+                        <strong>Validasi Pakar:</strong> Bapak Nuri Hermawan, S.Hum., M.Hum. meninjau 200 sampel acak secara <em>blind review</em>. Pakar merevisi 8 label (4%) yang didominasi kasus batas (teks saran/permintaan yang dideteksi negatif oleh aturan pemetaan sederhana namun secara pragmatik bernada netral).
+                    </p>
+                    <p class="text-xs border-l-2 border-primary pl-4 text-on-surface">
+                        Evaluasi ini menghasilkan skor <strong>Cohen's Kappa &kappa; = 0,9373</strong> (Almost Perfect Agreement). Penambahan data CNBC menyeimbangkan data dengan meningkatkan proporsi kelas Netral dari 11,6% menjadi 23,88%.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Section 7: Preprocessing & Pembagian Dataset -->
+            <div class="scroll-section" id="section-preprocessing-pembagian" data-viz-id="viz-preprocessing-pembagian">
+                <div class="flex items-center gap-2 mb-2">
+                    <span class="text-xs font-mono text-primary-dim uppercase tracking-wider">Slide 6</span>
+                    <span class="text-on-surface/20">•</span>
+                    <span class="text-xs font-mono text-on-surface-variant uppercase">Praproses</span>
+                </div>
+                <h2 class="text-2xl lg:text-3xl font-bold tracking-tight text-on-surface mb-6">Praproses &amp; Pembagian Dataset</h2>
+                <div class="space-y-4 text-on-surface-variant text-sm">
+                    <div class="bg-surface-container/40 p-4 rounded border border-outline-opaque space-y-3 font-mono text-xs">
+                        <strong class="text-on-surface block text-xs uppercase tracking-wider">Alur Regex Preprocessing:</strong>
+                        <ol class="list-decimal pl-5 space-y-1 text-on-surface-variant">
+                            <li>Case folding: <code>str.lower()</code></li>
+                            <li>URL: <code>re.sub(r'http\S+|www\S+', '', text)</code></li>
+                            <li>Mention: <code>re.sub(r'@[A-Za-z0-9_]+', '', text)</code></li>
+                            <li>Hashtag: <code>re.sub(r'#\w+', '', text)</code></li>
+                            <li>Non-Alfabet: <code>re.sub(r'[^a-z\s]', ' ', text)</code></li>
+                            <li>Normalisasi spasi: <code>re.sub(r'\s+', ' ', text).strip()</code></li>
+                        </ol>
+                    </div>
+                    <p class="text-base text-on-surface-variant leading-relaxed">
+                        Mekanisme <strong>Stopword Removal ditiadakan</strong> karena kata-kata fungsi negasi (seperti "tidak", "bukan", "belum") sangat krusial bagi mekanisme <em>self-attention</em> model IndoBERT dalam menangani negasi dan sarkasme.
+                    </p>
+                    <p class="text-base text-on-surface-variant leading-relaxed">
+                        Data final yang bersih dibagi secara <strong>Stratified Split</strong> menjadi: <strong>15.201 baris Data Latih (70%)</strong>, <strong>4.340 baris Data Validasi (20%)</strong>, dan <strong>2.173 baris Data Uji (10%)</strong>.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Section 8: Konfigurasi & Hasil Fine-Tuning -->
+            <div class="scroll-section" id="section-finetuning" data-viz-id="viz-finetuning">
+                <div class="flex items-center gap-2 mb-2">
+                    <span class="text-xs font-mono text-primary-dim uppercase tracking-wider">Slide 7</span>
+                    <span class="text-on-surface/20">•</span>
+                    <span class="text-xs font-mono text-on-surface-variant uppercase">Pelatihan Model</span>
+                </div>
+                <h2 class="text-2xl lg:text-3xl font-bold tracking-tight text-on-surface mb-6">Pelatihan Model &amp; Penanganan Imbalance</h2>
+                <div class="space-y-4 text-on-surface-variant text-base leading-relaxed">
+                    <p>
+                        Pelatihan model di Google Colab GPU Tesla T4 menggunakan optimizer <strong>AdamW</strong>, mixed precision (fp16), Learning Rate 2e-5, Batch Size 16, dan sequence length 128 token selama 3 Epoch (total 2.853 training steps).
+                    </p>
+                    <p>
+                        <strong>Weighted Cross-Entropy Loss:</strong> Mengingat ketimpangan sisa antar kelas (Positif dominan), diterapkan pembobotan kelas dinamis invers proporsional terhadap frekuensi data latih. Bobot penalti: <strong>Negatif 0,9615</strong>, <strong>Netral 1,3982</strong>, dan <strong>Positif 0,8034</strong>.
+                    </p>
+                    <p class="border-l-2 border-primary pl-4 text-on-surface">
+                        Model terbaik secara otomatis dipilih dari <strong>Epoch 2</strong> (Val F1-Macro 92,30%, Train Loss 0,1426, Val Loss 0,2706). Memasuki Epoch 3, Train Loss turun ke 0,0728 tetapi Val Loss naik ke 0,3664, menunjukkan munculnya gejala awal <em>mild overfitting</em>.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Section 9: Hasil Evaluasi Model pada Data Uji -->
+            <div class="scroll-section" id="section-evaluasi-model" data-viz-id="viz-evaluasi-model">
+                <div class="flex items-center gap-2 mb-2">
+                    <span class="text-xs font-mono text-primary-dim uppercase tracking-wider">Slide 8</span>
+                    <span class="text-on-surface/20">•</span>
+                    <span class="text-xs font-mono text-on-surface-variant uppercase">Hasil Kuantitatif</span>
+                </div>
+                <h2 class="text-2xl lg:text-3xl font-bold tracking-tight text-on-surface mb-6">Hasil Evaluasi Model pada Data Uji</h2>
+                <div class="space-y-4 text-on-surface-variant text-base leading-relaxed">
+                    <p>
+                        Pengujian kuantitatif (Offline Evaluation) menggunakan hold-out test set terpisah (N=2.173) menghasilkan skor: <strong>Akurasi Global 91,62%</strong>, <strong>F1-Score Makro 91,24%</strong>, <strong>Precision Makro 91,10%</strong>, dan <strong>Recall Makro 91,41%</strong>.
+                    </p>
+                    <p>
+                        <strong>Analisis Kinerja per Kelas:</strong>
+                    </p>
+                    <ul class="list-disc pl-5 space-y-1.5 text-xs text-on-surface-variant">
+                        <li><strong>Positif (2):</strong> F1-Score 93,69% (Precision 93,58%, Recall 93,79%). Performa tertinggi didukung representasi data terbesar dan struktur bahasa positif yang mudah dideteksi.</li>
+                        <li><strong>Negatif (0):</strong> F1-Score 90,88% (Precision 92,32%, Recall 89,49%). Tingginya recall negatif sangat krusial dalam konteks pemantauan krisis/isu publik.</li>
+                        <li><strong>Netral (1):</strong> F1-Score 89,14% (Precision 87,41%, Recall 90,94%). <strong>Melonjak +15,36 poin</strong> dibanding model awal pra-CNBC (73,78%), membuktikan keampuhan domain adaptation.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Section 10: Confusion Matrix pada Data Uji -->
+            <div class="scroll-section" id="section-confusion-matrix" data-viz-id="viz-confusion-matrix">
+                <div class="flex items-center gap-2 mb-2">
+                    <span class="text-xs font-mono text-primary-dim uppercase tracking-wider">Slide 9</span>
+                    <span class="text-on-surface/20">•</span>
+                    <span class="text-xs font-mono text-on-surface-variant uppercase">Analisis Prediksi</span>
+                </div>
+                <h2 class="text-2xl lg:text-3xl font-bold tracking-tight text-on-surface mb-6">Analisis Kesalahan (Error Analysis)</h2>
+                <div class="space-y-4 text-on-surface-variant text-base leading-relaxed">
+                    <p>
+                        Berdasarkan sebaran confusion matrix pada data uji (N=2.173):
+                    </p>
+                    <ul class="list-disc pl-5 space-y-2 text-sm text-on-surface-variant">
+                        <li>Model mengklasifikasikan dengan benar <strong>673 dari 752 data Negatif</strong> dan <strong>846 dari 902 data Positif</strong>.</li>
+                        <li>Kesalahan terbesar terjadi pada persinggungan kelas <strong>Negatif dan Netral</strong>: 41 data Negatif salah dideteksi sebagai Netral, dan 27 data Netral salah dideteksi sebagai Negatif.</li>
+                        <li>Secara linguistik, pola ini konsisten dengan tipisnya batas demarkasi semantik antara keluhan implisit (yang dikategorikan netral/informasi oleh pakar bahasa) dengan ungkapan sentimen negatif secara eksplisit di media sosial.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Section 11: Implementasi Sistem Berbasis Web -->
+            <div class="scroll-section" id="section-implementasi-web" data-viz-id="viz-implementasi-web">
+                <div class="flex items-center gap-2 mb-2">
+                    <span class="text-xs font-mono text-primary-dim uppercase tracking-wider">Slide 10</span>
+                    <span class="text-on-surface/20">•</span>
+                    <span class="text-xs font-mono text-on-surface-variant uppercase">Arsitektur Web</span>
+                </div>
+                <h2 class="text-2xl lg:text-3xl font-bold tracking-tight text-on-surface mb-6">Implementasi Arsitektur Dual-Service</h2>
+                <div class="space-y-4 text-on-surface-variant text-base leading-relaxed">
+                    <p>
+                        Sistem diintegrasikan menggunakan arsitektur <strong>Two-Service Microservices</strong> berbasis Python untuk memisahkan tanggung jawab (Separation of Concerns):
+                    </p>
+                    <ul class="list-disc pl-5 space-y-2 text-sm text-on-surface-variant">
+                        <li><strong>Layanan Utama (Flask - Port 5000):</strong> Merender antarmuka pengguna (Single Page Application), mengelola route REST API, dan memuat model IndoBERT ke RAM secara persisten (<em>Persistent Model Loading</em>) untuk menghindari overhead pemuatan file model 500MB di setiap request.</li>
+                        <li><strong>Layanan Scraper (FastAPI - Port 8000):</strong> Menjalankan Playwright dalam event loop asinkron murni untuk penarikan data paralel tanpa memblokir thread pelayanan web utama Flask. Komunikasi antar layanan menggunakan client <strong>HTTPX</strong>.</li>
+                        <li><strong>Query Expansion:</strong> Mengintegrasikan LLM API (OpenRouter) untuk memperluas kata kunci pencarian menjadi kueri boolean (OR) guna menangani ejaan gaul/informal.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Section 12: Pengujian Fungsional Sistem -->
+            <div class="scroll-section" id="section-pengujian-fungsional" data-viz-id="viz-pengujian-fungsional">
+                <div class="flex items-center gap-2 mb-2">
+                    <span class="text-xs font-mono text-primary-dim uppercase tracking-wider">Slide 11</span>
+                    <span class="text-on-surface/20">•</span>
+                    <span class="text-xs font-mono text-on-surface-variant uppercase">Pengujian</span>
+                </div>
+                <h2 class="text-2xl lg:text-3xl font-bold tracking-tight text-on-surface mb-6">Pengujian Fungsional (Black Box)</h2>
+                <div class="space-y-4 text-on-surface-variant text-base leading-relaxed">
+                    <p>
+                        Verifikasi fungsionalitas sistem diuji secara menyeluruh menggunakan metode <strong>Black Box Testing</strong> pada lingkungan localhost.
+                    </p>
+                    <p>
+                        Pengujian didasarkan pada target PRD yang meliputi:
+                    </p>
+                    <ul class="list-disc pl-5 space-y-1.5 text-xs text-on-surface-variant">
+                        <li><strong>Analisis Teks Tunggal:</strong> TC-A01 s.d TC-A03 sukses mendeteksi 3 kelas sentimen; TC-A04 sukses memproses slang gaul; TC-A09 sukses melakukan sanitasi XSS (mencegah injeksi tag script).</li>
+                        <li><strong>Analisis Batch CSV:</strong> TC-B01 s.d TC-B06 sukses memproses upload, menolak format selain CSV, auto-detect kolom teks, dan mengunduh laporan.</li>
+                        <li><strong>Live Scraping &amp; Polling:</strong> TC-C01 s.d TC-C07 sukses melakukan scraping asinkron, polling AJAX per 2 detik, filter periodik data, dan penanganan error server down.</li>
+                    </ul>
+                    <p class="text-positif font-semibold border-l-2 border-positif pl-4 text-sm">
+                        Lulus Uji 25/25 Test Cases (100% Pass) dengan Zero Failures. Seluruh kriteria kesuksesan (SM-01 s.d SM-08) dan 10 Non-Functional Requirements (NFR) dinyatakan terpenuhi.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Section 13: Kesimpulan & Saran -->
+            <div class="scroll-section" id="section-kesimpulan-saran" data-viz-id="viz-kesimpulan-saran">
+                <div class="flex items-center gap-2 mb-2">
+                    <span class="text-xs font-mono text-primary-dim uppercase tracking-wider">Slide 12 &amp; 13</span>
+                    <span class="text-on-surface/20">•</span>
+                    <span class="text-xs font-mono text-on-surface-variant uppercase">Akhir</span>
+                </div>
+                <h2 class="text-2xl lg:text-3xl font-bold tracking-tight text-on-surface mb-6">Kesimpulan &amp; Saran</h2>
+                <div class="space-y-4 text-on-surface-variant text-sm">
+                    <div class="bg-surface-container/40 p-4 rounded border border-outline-opaque space-y-2">
+                        <strong class="text-on-surface block font-mono text-xs uppercase tracking-wider">Kesimpulan Utama</strong>
+                        <ul class="list-disc pl-5 space-y-1.5 text-xs">
+                            <li>Model IndoBERT multi-domain mencapai akurasi global 91,62% (melampaui target PRD &ge;80% sebesar +11,62 poin) dengan generalization gap sangat kecil (1,03%).</li>
+                            <li>Penambahan domain CNBC dan dynamic class weighting melipatgandakan performa kelas Netral (+15,36%).</li>
+                            <li>Sistem dual-service Flask-FastAPI berhasil diimplementasikan secara asinkron dan lulus uji Black Box 100%.</li>
+                            <li>Verifikasi anotasi mega-dataset oleh pakar menunjukkan validitas yang sangat tinggi (kappa = 0,9373).</li>
+                        </ul>
+                    </div>
+                    <div class="bg-surface-container/40 p-4 rounded border border-outline-opaque space-y-2">
+                        <strong class="text-on-surface block font-mono text-xs uppercase tracking-wider">Saran Penelitian Lanjutan</strong>
+                        <ul class="list-disc pl-5 space-y-1.5 text-xs">
+                            <li>Menerapkan teknik <em>label smoothing</em> (&epsilon; = 0,1) untuk mengurangi overconfidence model.</li>
+                            <li>Melakukan studi ablasi yang membandingkan performa model IndoBERT Base dengan IndoBERTweet pada dataset multi-domain yang sama.</li>
+                            <li>Migrasi in-memory job store ke sistem database persisten (SQLite/Redis) dan Celery untuk skenario multi-user berskala produksi.</li>
+                            <li>Mengintegrasikan modul scraper dengan mekanisme rotasi proxy dan cookie refresh terjadwal untuk menghindari bot-detection.</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Section 14: Terima Kasih -->
+            <div class="scroll-section" id="section-terima-kasih" data-viz-id="viz-terima-kasih">
+                <div class="flex items-center gap-2 mb-2">
+                    <span class="text-xs font-mono text-primary-dim uppercase tracking-wider">Slide 14</span>
+                    <span class="text-on-surface/20">•</span>
+                    <span class="text-xs font-mono text-on-surface-variant uppercase">Selesai</span>
+                </div>
+                <h2 class="text-2xl lg:text-3xl font-bold tracking-tight text-on-surface mb-6">Akhir Presentasi</h2>
+                <div class="space-y-4 text-on-surface-variant text-base leading-relaxed">
+                    <p>
+                        Terima kasih atas perhatian, dukungan, dan bimbingan yang telah diberikan selama penyusunan skripsi ini.
+                    </p>
+                    <p class="text-primary-dim font-mono text-sm mt-6">
+                        Program Studi D4 Teknik Informatika<br>
+                        Fakultas Vokasi — Universitas Airlangga<br>
+                        2026
+                    </p>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Right Column: Sticky Visualization Panel -->
+        <div id="viz-column" class="flex">
+            <div id="viz-sticky-container" class="w-full h-full relative">
+                
+                <!-- 1. Latar Belakang Viz -->
+                <div class="viz-panel active" id="viz-latar-belakang">
+                    <div class="glass-panel p-6 rounded-lg w-full max-w-[420px] shadow-2xl relative overflow-hidden flex flex-col items-center">
+                        <span class="text-xs font-mono text-primary-dim uppercase tracking-wider mb-4 block">Multi-Domain Convergence</span>
+                        
+                        <!-- Flow Diagram -->
+                        <div class="w-full flex flex-col items-center gap-4 relative">
+                            <!-- Sources -->
+                            <div class="grid grid-cols-4 gap-2 w-full text-center z-10 text-[10px] font-mono">
+                                <div class="p-2 bg-surface rounded border border-outline-opaque" title="IndoNLU (Baku)">Formal</div>
+                                <div class="p-2 bg-surface rounded border border-outline-opaque" title="Kaggle/Spotify (Gaul/Slang)">Informal</div>
+                                <div class="p-2 bg-surface rounded border border-outline-opaque" title="NusaX (Jawa/Sunda)">Daerah</div>
+                                <div class="p-2 bg-surface rounded border border-outline-opaque" title="CNBC Indonesia (Jurnalistik)">Jurnalistik</div>
+                            </div>
+                            
+                            <!-- SVG lines for flows -->
+                            <svg class="w-full h-24 stroke-primary/30 stroke-[1.5] fill-none" viewBox="0 0 200 90">
+                                <path d="M 25,0 L 25,20 L 100,50" />
+                                <path d="M 75,0 L 75,25 L 100,50" />
+                                <path d="M 125,0 L 125,25 L 100,50" />
+                                <path d="M 175,0 L 175,20 L 100,50" />
+                                <line x1="100" y1="50" x2="100" y2="90" class="stroke-primary stroke-2" />
+                                
+                                <!-- Flows particles -->
+                                <circle cx="25" cy="10" r="3" fill="#d6e3ff" class="flow-particle" style="animation-delay: 0s" />
+                                <circle cx="75" cy="10" r="3" fill="#d6e3ff" class="flow-particle" style="animation-delay: 0.8s" />
+                                <circle cx="125" cy="10" r="3" fill="#d6e3ff" class="flow-particle" style="animation-delay: 1.5s" />
+                                <circle cx="175" cy="10" r="3" fill="#d6e3ff" class="flow-particle" style="animation-delay: 0.3s" />
+                            </svg>
+                            
+                            <!-- Model Target -->
+                            <div class="w-full p-4 bg-primary text-surface-dim font-bold text-center rounded border border-primary/20 shadow-lg glow-active">
+                                IndoBERT Multi-Domain
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2. Rumusan & Tujuan Viz -->
+                <div class="viz-panel" id="viz-rumusan-tujuan">
+                    <div class="flex flex-col gap-4 w-full max-w-[420px]">
+                        <div class="glass-panel p-4 rounded-lg flex items-center gap-4 border-l-4 border-l-primary">
+                            <span class="material-symbols-outlined text-[32px] text-primary shrink-0">contact_support</span>
+                            <div>
+                                <h4 class="font-bold text-sm text-on-surface">Klasifikasi Sentimen Variatif</h4>
+                                <p class="text-xs text-on-surface-variant mt-1">Mengukur keakuratan model fine-tuning terhadap keragaman ekspresi linguistik.</p>
+                            </div>
+                        </div>
+                        <div class="glass-panel p-4 rounded-lg flex items-center gap-4 border-l-4 border-l-positif">
+                            <span class="material-symbols-outlined text-[32px] text-positif shrink-0">terminal</span>
+                            <div>
+                                <h4 class="font-bold text-sm text-on-surface">Integrasi Web Real-Time</h4>
+                                <p class="text-xs text-on-surface-variant mt-1">Membongkar data mentah media sosial dan merender hasilnya dalam &lt;1 detik.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+
+
+                <!-- 5. Metodologi Viz -->
+                <div class="viz-panel" id="viz-metodologi">
+                    <div class="glass-panel p-6 rounded-lg w-full max-w-[420px]">
+                        <span class="text-xs font-mono text-primary-dim uppercase tracking-wider mb-4 block text-center">Research Workflow Pipeline</span>
+                        <div class="flex flex-col gap-2 font-mono text-xs w-full" id="pipeline-container">
+                            <div class="p-2 bg-surface rounded border border-outline-opaque transition-all duration-300 flex items-center justify-between" data-step="1">
+                                <span>1. Data Collection</span>
+                                <span class="material-symbols-outlined text-[14px] text-primary">circle</span>
+                            </div>
+                            <div class="p-2 bg-surface rounded border border-outline-opaque transition-all duration-300 flex items-center justify-between" data-step="2">
+                                <span>2. Relabeling &amp; Expert Validation</span>
+                                <span class="material-symbols-outlined text-[14px] text-primary">circle</span>
+                            </div>
+                            <div class="p-2 bg-surface rounded border border-outline-opaque transition-all duration-300 flex items-center justify-between" data-step="3">
+                                <span>3. Data Preprocessing</span>
+                                <span class="material-symbols-outlined text-[14px] text-primary">circle</span>
+                            </div>
+                            <div class="p-2 bg-surface rounded border border-outline-opaque transition-all duration-300 flex items-center justify-between" data-step="4">
+                                <span>4. IndoBERT Fine-Tuning</span>
+                                <span class="material-symbols-outlined text-[14px] text-primary">circle</span>
+                            </div>
+                            <div class="p-2 bg-surface rounded border border-outline-opaque transition-all duration-300 flex items-center justify-between" data-step="5">
+                                <span>5. Model Evaluation</span>
+                                <span class="material-symbols-outlined text-[14px] text-primary">circle</span>
+                            </div>
+                            <div class="p-2 bg-surface rounded border border-outline-opaque transition-all duration-300 flex items-center justify-between" data-step="6">
+                                <span>6. Web Application Integration</span>
+                                <span class="material-symbols-outlined text-[14px] text-primary">circle</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 6. Hasil Data Viz -->
+                <div class="viz-panel" id="viz-pengumpulan-data">
+                    <div class="glass-panel p-6 rounded-lg w-full max-w-[420px] flex flex-col gap-4">
+                        <span class="text-xs font-mono text-primary-dim uppercase tracking-wider block text-center">Dataset Composition &amp; Agreement</span>
+                        
+                        <!-- Donut Bar Representation -->
+                        <div class="space-y-1.5 w-full">
+                            <span class="text-xs font-mono text-on-surface-variant block">Total Data Latih: 21.762</span>
+                            <div class="w-full h-6 rounded overflow-hidden flex border border-outline-opaque font-mono text-[9px] font-bold text-surface-dim">
+                                <div class="bg-primary flex items-center justify-center" style="width: 58.6%" title="IndoNLU: 12.760">IndoNLU</div>
+                                <div class="bg-primary-dim flex items-center justify-center border-l border-surface" style="width: 9.2%" title="NusaX: 2.000">NusaX</div>
+                                <div class="bg-[#b6c6ed] flex items-center justify-center border-l border-surface" style="width: 18.4%" title="Spotify: 4.002">Spotify</div>
+                                <div class="bg-[#8f9097] flex items-center justify-center border-l border-surface" style="width: 13.8%" title="CNBC: 3.000">CNBC</div>
+                            </div>
+                        </div>
+                        
+                        <!-- Kappa badge -->
+                        <div class="flex items-center justify-between bg-surface p-3 rounded border border-outline-opaque w-full mt-2">
+                            <div>
+                                <span class="text-[10px] font-mono text-on-surface-variant block uppercase">Cohen's Kappa (&kappa;)</span>
+                                <strong class="text-2xl font-mono text-positif leading-none">0,9373</strong>
+                            </div>
+                            <div class="bg-positif/10 border border-positif/20 text-positif text-[10px] font-mono px-3 py-1 rounded">
+                                Almost Perfect Agreement
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 7. Preprocessing Viz -->
+                <div class="viz-panel" id="viz-preprocessing-pembagian">
+                    <div class="glass-panel p-6 rounded-lg w-full max-w-[420px] flex flex-col gap-4">
+                        <span class="text-xs font-mono text-primary-dim uppercase tracking-wider block text-center">Dataset Split Ratio</span>
+                        
+                        <div class="w-full h-8 bg-surface rounded-lg overflow-hidden border border-outline-opaque flex font-mono text-xs font-bold">
+                            <div class="bg-primary text-surface-dim flex items-center justify-center" style="width: 70%">70% Latih</div>
+                            <div class="bg-primary-dim text-surface-dim flex items-center justify-center border-l border-surface" style="width: 20%">20% Val</div>
+                            <div class="bg-surface-container flex items-center justify-center border-l border-surface text-on-surface" style="width: 10%">10% Uji</div>
+                        </div>
+
+                        <div class="grid grid-cols-3 gap-2 w-full text-center font-mono text-[10px]">
+                            <div class="p-2 bg-surface rounded border border-outline-opaque">
+                                <span class="text-on-surface-variant block mb-1">Train Size</span>
+                                <strong>15.201</strong>
+                            </div>
+                            <div class="p-2 bg-surface rounded border border-outline-opaque">
+                                <span class="text-on-surface-variant block mb-1">Val Size</span>
+                                <strong>4.340</strong>
+                            </div>
+                            <div class="p-2 bg-surface rounded border border-outline-opaque">
+                                <span class="text-on-surface-variant block mb-1">Test Size</span>
+                                <strong>2.173</strong>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 8. Fine-Tuning Viz -->
+                <div class="viz-panel" id="viz-finetuning">
+                    <div class="glass-panel p-6 rounded-lg w-full max-w-[420px] flex flex-col gap-3">
+                        <span class="text-xs font-mono text-primary-dim uppercase tracking-wider block text-center">Training Progress History</span>
+                        
+                        <table class="w-full text-left font-mono text-xs border-collapse">
+                            <thead>
+                                <tr class="border-b border-outline-opaque text-on-surface-variant">
+                                    <th class="pb-2">Epoch</th>
+                                    <th class="pb-2">Train Loss</th>
+                                    <th class="pb-2 text-right">Val F1-Macro</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr class="border-b border-outline-opaque/50">
+                                    <td class="py-2">Epoch 1</td>
+                                    <td class="py-2 text-[#ffb4ab]">0,3325</td>
+                                    <td class="py-2 text-right">91,87%</td>
+                                </tr>
+                                <tr class="bg-positif/10 border-y border-positif/30 font-bold text-positif">
+                                    <td class="py-2 pl-2">Epoch 2 &bigstar;</td>
+                                    <td class="py-2">0,1426</td>
+                                    <td class="py-2 pr-2 text-right">92,30%</td>
+                                </tr>
+                                <tr class="opacity-60">
+                                    <td class="py-2">Epoch 3</td>
+                                    <td class="py-2 text-[#4ade80]">0,0728</td>
+                                    <td class="py-2 text-right">92,18%</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <div class="text-[10px] font-mono text-on-surface-variant mt-2 text-center font-semibold text-primary">
+                            * Selected Epoch 2 (Val Accuracy: 92,65%)
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 9. Evaluasi Model Viz -->
+                <div class="viz-panel" id="viz-evaluasi-model">
+                    <div class="glass-panel p-6 rounded-lg w-full max-w-[420px] flex flex-col gap-4">
+                        <span class="text-xs font-mono text-primary-dim uppercase tracking-wider block text-center">Global Performance Metrics</span>
+                        
+                        <!-- 2x2 Grid -->
+                        <div class="grid grid-cols-2 gap-4 w-full">
+                            <div class="p-3 bg-surface rounded-lg border border-outline-opaque text-center relative overflow-hidden">
+                                <span class="text-[20px] lg:text-[24px] font-bold font-mono text-positif block">91,62%</span>
+                                <span class="text-[10px] font-mono text-on-surface-variant">Global Accuracy</span>
+                            </div>
+                            <div class="p-3 bg-surface rounded-lg border border-outline-opaque text-center relative overflow-hidden">
+                                <span class="text-[20px] lg:text-[24px] font-bold font-mono text-primary block">91,24%</span>
+                                <span class="text-[10px] font-mono text-on-surface-variant">F1-Score Macro</span>
+                            </div>
+                            <div class="p-3 bg-surface rounded-lg border border-outline-opaque text-center relative overflow-hidden">
+                                <span class="text-[20px] lg:text-[24px] font-bold font-mono text-on-surface block">91,10%</span>
+                                <span class="text-[10px] font-mono text-on-surface-variant">Precision Macro</span>
+                            </div>
+                            <div class="p-3 bg-surface rounded-lg border border-outline-opaque text-center relative overflow-hidden">
+                                <span class="text-[20px] lg:text-[24px] font-bold font-mono text-on-surface block">91,41%</span>
+                                <span class="text-[10px] font-mono text-on-surface-variant">Recall Macro</span>
+                            </div>
+                        </div>
+
+                        <!-- Netral Class highlight bar -->
+                        <div class="border-t border-outline-opaque pt-3 w-full space-y-1">
+                            <div class="flex justify-between text-xs font-mono font-bold text-positif">
+                                <span>F1 Kelas Netral (Skripsi Target)</span>
+                                <span>89,14% (+15,36)</span>
+                            </div>
+                            <div class="w-full bg-surface-container-low h-2.5 rounded-full overflow-hidden border border-positif/20">
+                                <div class="bg-positif h-full rounded-full" style="width: 89.14%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 10. Confusion Matrix Viz -->
+                <div class="viz-panel" id="viz-confusion-matrix">
+                    <div class="glass-panel p-4 rounded-lg w-full max-w-[420px] flex flex-col gap-3">
+                        <span class="text-xs font-mono text-primary-dim uppercase tracking-wider block text-center">Confusion Matrix</span>
+                        
+                        <div class="overflow-x-auto w-full">
+                            <table class="w-full text-center font-mono text-xs border-collapse">
+                                <thead>
+                                    <tr class="text-on-surface-variant text-[10px] border-b border-outline-opaque">
+                                        <th class="p-1">Aktual \ Pred</th>
+                                        <th class="p-1 text-[#ffb4ab]">Negatif</th>
+                                        <th class="p-1 text-on-surface">Netral</th>
+                                        <th class="p-1 text-[#4ade80]">Positif</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr class="border-b border-outline-opaque/30">
+                                        <td class="p-2 font-bold text-[#ffb4ab] text-left">Negatif</td>
+                                        <td class="p-2 bg-positif/20 font-bold border border-positif/30 text-positif" title="True Negatif">673</td>
+                                        <td class="p-2 bg-surface-container/50 text-on-surface-variant">41</td>
+                                        <td class="p-2 bg-surface-container/50 text-on-surface-variant">38</td>
+                                    </tr>
+                                    <tr class="border-b border-outline-opaque/30">
+                                        <td class="p-2 font-bold text-on-surface text-left">Netral</td>
+                                        <td class="p-2 bg-surface-container/50 text-on-surface-variant">27</td>
+                                        <td class="p-2 bg-positif/20 font-bold border border-positif/30 text-positif" title="True Netral">472</td>
+                                        <td class="p-2 bg-surface-container/50 text-on-surface-variant">20</td>
+                                    </tr>
+                                    <tr class="border-b border-outline-opaque/30">
+                                        <td class="p-2 font-bold text-[#4ade80] text-left">Positif</td>
+                                        <td class="p-2 bg-surface-container/50 text-on-surface-variant">29</td>
+                                        <td class="p-2 bg-surface-container/50 text-on-surface-variant">27</td>
+                                        <td class="p-2 bg-positif/20 font-bold border border-positif/30 text-positif" title="True Positif">846</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="text-[9px] text-on-surface-variant text-center font-mono leading-relaxed mt-1">
+                            * Diagonal berwarna hijau menunjukkan jumlah prediksi yang dikelompokkan dengan benar.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 11. Implementasi Web Viz -->
+                <div class="viz-panel" id="viz-implementasi-web">
+                    <div class="glass-panel p-6 rounded-lg w-full max-w-[420px] flex flex-col gap-4">
+                        <span class="text-xs font-mono text-primary-dim uppercase tracking-wider block text-center">System Integration Flow</span>
+                        
+                        <div class="flex flex-col gap-3 font-mono text-[11px] w-full">
+                            <div class="p-2.5 bg-surface border border-outline-opaque rounded flex items-center justify-between">
+                                <span class="flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-[16px] text-primary">client_tablet</span>
+                                    Web Client (SPA)
+                                </span>
+                                <span class="text-on-surface-variant">HTTP/JSON</span>
+                            </div>
+                            
+                            <!-- Arrow -->
+                            <div class="w-full flex justify-center py-0.5">
+                                <span class="material-symbols-outlined text-[20px] text-primary rotate-90 leading-none">arrow_forward</span>
+                            </div>
+
+                            <div class="p-2.5 bg-surface border border-primary/30 rounded flex items-center justify-between shadow-[0_0_8px_rgba(214,227,255,0.1)]">
+                                <span class="flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-[16px] text-primary">dns</span>
+                                    Flask Main Server (Port 5000)
+                                </span>
+                                <span class="text-primary font-bold">IndoBERT (RAM Loaded)</span>
+                            </div>
+                            
+                            <!-- Arrow -->
+                            <div class="w-full flex justify-center py-0.5">
+                                <span class="material-symbols-outlined text-[20px] text-primary rotate-90 leading-none">arrow_forward</span>
+                            </div>
+
+                            <div class="p-2.5 bg-surface border border-outline-opaque rounded flex items-center justify-between">
+                                <span class="flex items-center gap-1.5">
+                                    <span class="material-symbols-outlined text-[16px] text-primary">anchor</span>
+                                    FastAPI Scraper (Port 8000)
+                                </span>
+                                <span class="text-on-surface-variant">Playwright Engine</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 12. Pengujian Sistem Viz -->
+                <div class="viz-panel" id="viz-pengujian-fungsional">
+                    <div class="glass-panel p-6 rounded-lg w-full max-w-[420px] flex flex-col gap-4">
+                        <span class="text-xs font-mono text-primary-dim uppercase tracking-wider block text-center">Black Box Testing Dashboard</span>
+                        
+                        <div class="grid grid-cols-3 gap-2 w-full text-center">
+                            <div class="p-2 bg-surface rounded border border-positif/30 flex flex-col justify-center items-center shadow-[0_0_6px_rgba(74,222,128,0.08)]">
+                                <strong class="text-xl font-mono text-positif block">25/25</strong>
+                                <span class="text-[9px] font-mono text-on-surface-variant uppercase">Test Cases Pass</span>
+                            </div>
+                            <div class="p-2 bg-surface rounded border border-positif/30 flex flex-col justify-center items-center shadow-[0_0_6px_rgba(74,222,128,0.08)]">
+                                <strong class="text-xl font-mono text-positif block">8/8</strong>
+                                <span class="text-[9px] font-mono text-on-surface-variant uppercase">Success Metrics</span>
+                            </div>
+                            <div class="p-2 bg-surface rounded border border-positif/30 flex flex-col justify-center items-center shadow-[0_0_6px_rgba(74,222,128,0.08)]">
+                                <strong class="text-xl font-mono text-positif block">10/10</strong>
+                                <span class="text-[9px] font-mono text-on-surface-variant uppercase">NFR Met</span>
+                            </div>
+                        </div>
+                        
+                        <div class="w-full bg-positif/10 border border-positif/20 text-positif text-xs p-3 rounded font-mono text-center">
+                            Sistem Web Dinyatakan Lulus Uji 100% (Zero Failures)
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 13. Kesimpulan & Saran Viz -->
+                <div class="viz-panel" id="viz-kesimpulan-saran">
+                    <div class="glass-panel p-6 rounded-lg w-full max-w-[420px] flex flex-col gap-3">
+                        <span class="text-xs font-mono text-primary-dim uppercase tracking-wider block text-center">Research Output Summary</span>
+                        <div class="space-y-2.5 font-mono text-xs w-full">
+                            <div class="flex items-center gap-2 text-positif">
+                                <span class="material-symbols-outlined text-[16px]">check_circle</span>
+                                <span>Akurasi Model: 91,62% (&ge;80% target)</span>
+                            </div>
+                            <div class="flex items-center gap-2 text-positif">
+                                <span class="material-symbols-outlined text-[16px]">check_circle</span>
+                                <span>F1 Netral: 89,14% (Meningkat +15,36)</span>
+                            </div>
+                            <div class="flex items-center gap-2 text-primary-dim">
+                                <span class="material-symbols-outlined text-[16px]">info</span>
+                                <span>Arsitektur: Dual-Service Flask/FastAPI</span>
+                            </div>
+                            <div class="flex items-center gap-2 text-primary-dim">
+                                <span class="material-symbols-outlined text-[16px]">info</span>
+                                <span>Validasi Pakar: &kappa; = 0,9373 (Almost Perfect)</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 14. Penutup Viz -->
+                <div class="viz-panel" id="viz-terima-kasih">
+                    <div class="glass-panel p-8 rounded-lg w-full max-w-[420px] text-center flex flex-col justify-center items-center shadow-2xl relative overflow-hidden min-h-[250px]">
+                        <div class="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(214,227,255,0.08)_0%,transparent_80%)] pointer-events-none"></div>
+                        <h3 class="text-3xl font-bold tracking-widest text-primary mb-3">TERIMA KASIH</h3>
+                        <p class="text-xs font-mono text-on-surface-variant uppercase tracking-widest mb-6">Seminar Hasil Skripsi</p>
+                        <div class="w-12 h-[1px] bg-primary/30 mb-6"></div>
+                        <p class="text-xs text-on-surface-variant max-w-xs font-mono leading-relaxed">
+                            Fairnanda Kurnia Gusty<br>
+                            Universitas Airlangga — 2026
+                        </p>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Slide Footer Details -->
+    <footer class="bg-surface-container-lowest/80 border-t border-outline-opaque py-8 px-6 lg:px-12 text-center text-xs text-on-surface-variant relative z-30 font-mono">
+        <p class="max-w-2xl mx-auto leading-relaxed">
+            Sistem Klasifikasi Sentimen Teks Media Sosial Menggunakan IndoBERT dengan Strategi Multi-Domain. <br>
+            Seminar Hasil Skripsi © 2026 Fairnanda Kurnia Gusty — Universitas Airlangga.
+        </p>
+    </footer>
+
+    <!-- Scroll & Viz Controller Logic -->
+    <script>
+        document.addEventListener("DOMContentLoaded", () => {
+            const sections = document.querySelectorAll('.scroll-section');
+            const panels = document.querySelectorAll('.viz-panel');
+            const navDots = document.querySelectorAll('.nav-dot');
+            const progressBar = document.getElementById('progress-bar');
+            
+            // 1. Scroll Progress Bar
+            window.addEventListener('scroll', () => {
+                const scrollTop = window.scrollY;
+                const docHeight = document.documentElement.scrollHeight - window.innerHeight;
+                const scrollPercent = (scrollTop / docHeight) * 100;
+                progressBar.style.width = scrollPercent + '%';
+            });
+
+            // 2. Intersection Observer for Scrollytelling
+            const observerOptions = {
+                root: null,
+                rootMargin: '-30% 0px -40% 0px', // Matches center of screen
+                threshold: 0
+            };
+
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        const targetVizId = entry.target.getAttribute('data-viz-id');
+                        const sectionId = entry.target.getAttribute('id');
+
+                        // Set active section highlight
+                        sections.forEach(s => s.classList.remove('active-reading'));
+                        entry.target.classList.add('active-reading');
+
+                        // Toggle active visualization panel
+                        panels.forEach(panel => {
+                            if (panel.getAttribute('id') === targetVizId) {
+                                panel.classList.add('active');
+                            } else {
+                                panel.classList.remove('active');
+                            }
+                        });
+
+                        // Toggle active navigation dot
+                        navDots.forEach(dot => {
+                            if (dot.getAttribute('href') === `#${sectionId}`) {
+                                dot.classList.add('active');
+                            } else {
+                                dot.classList.remove('active');
+                            }
+                        });
+
+                        // Trigger step-specific animations
+                        triggerStepAnimation(targetVizId);
+                    }
+                });
+            }, observerOptions);
+
+            sections.forEach(section => observer.observe(section));
+
+            // 3. Navigation Dots Click Scroll
+            navDots.forEach(dot => {
+                dot.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const targetId = dot.getAttribute('href');
+                    const targetEl = document.querySelector(targetId);
+                    if (targetEl) {
+                        targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                });
+            });
+
+            // 4. Keyboard Navigation (Arrow keys / Space)
+            const scrollElements = [document.getElementById('hero'), ...document.querySelectorAll('.scroll-section')];
+            
+            function getActiveElementIndex() {
+                let closestIdx = 0;
+                let minDistance = Infinity;
+                const viewportCenter = window.innerHeight / 2;
+                
+                scrollElements.forEach((el, idx) => {
+                    const rect = el.getBoundingClientRect();
+                    const elCenter = rect.top + rect.height / 2;
+                    const distance = Math.abs(elCenter - viewportCenter);
+                    if (distance < minDistance) {
+                        minDistance = distance;
+                        closestIdx = idx;
+                    }
+                });
+                return closestIdx;
+            }
+
+            function navigateToNext() {
+                const currentIdx = getActiveElementIndex();
+                if (currentIdx < scrollElements.length - 1) {
+                    scrollElements[currentIdx + 1].scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }
+
+            function navigateToPrev() {
+                const currentIdx = getActiveElementIndex();
+                if (currentIdx > 0) {
+                    scrollElements[currentIdx - 1].scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }
+
+            window.addEventListener('keydown', (e) => {
+                // If focus is in input/textarea, ignore
+                if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') {
+                    return;
+                }
+                
+                if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === 'Space') {
+                    e.preventDefault();
+                    navigateToNext();
+                } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+                    e.preventDefault();
+                    navigateToPrev();
+                }
+            });
+
+            // 5. Step-specific JS Animations/Triggers
+            function triggerStepAnimation(vizId) {
+                // Metodologi step highlight
+                if (vizId === 'viz-metodologi') {
+                    // Reset steps
+                    const steps = document.querySelectorAll('#pipeline-container [data-step]');
+                    steps.forEach(s => {
+                        s.classList.remove('bg-primary/20', 'border-primary/50', 'text-primary');
+                        s.querySelector('span:last-child').textContent = 'circle';
+                    });
+                    
+                    // Progressive step highlighting simulation
+                    let currentStep = 1;
+                    const interval = setInterval(() => {
+                        const activeStep = document.querySelector(`#pipeline-container [data-step="${currentStep}"]`);
+                        if (activeStep) {
+                            activeStep.classList.add('bg-primary/20', 'border-primary/50', 'text-primary');
+                            activeStep.querySelector('span:last-child').textContent = 'check_circle';
+                        }
+                        currentStep++;
+                        if (currentStep > 6) clearInterval(interval);
+                    }, 400);
+                }
+            }
+        });
+    </script>
+</body>
+</html>
