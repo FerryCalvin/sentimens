@@ -1697,8 +1697,8 @@
                         <td class="p-3 whitespace-nowrap text-xs font-mono-code">${row.source || '-'}</td>
                         <td class="p-3 text-sm leading-relaxed" title="Teks yang dianalisis: ${escAttr(row.clean_text)}">${row.raw_text || row.text || '-'}${row.skipped ? ` <span class="ml-1 text-xs opacity-70" title="${escAttr(row.skip_reason)}">⚠ Dilewati</span>` : ''}</td>
                         <td class="p-3 whitespace-nowrap font-semibold" style="color: ${labelColor}">${row.predicted_label || '-'}</td>
-                        <td class="p-3 whitespace-nowrap text-xs font-mono-code">${(row.confidence_positive || 0).toFixed(2)} / ${(row.confidence_negative || 0).toFixed(2)} / ${(row.confidence_neutral || 0).toFixed(2)}</td>
-                        <td class="p-3 whitespace-nowrap text-xs font-mono-code font-semibold text-primary">${(((row.confidence_overall || row.confidence || 0) * 100)).toFixed(1)}%</td>
+                        <td class="p-3 whitespace-nowrap text-xs font-mono-code">${((row.confidence_positive || 0) * 100).toFixed(2)}% / ${((row.confidence_negative || 0) * 100).toFixed(2)}% / ${((row.confidence_neutral || 0) * 100).toFixed(2)}%</td>
+                        <td class="p-3 whitespace-nowrap text-xs font-mono-code font-semibold text-primary">${(((row.confidence_overall || row.confidence || 0) * 100)).toFixed(2)}%</td>
                     `;
                     tbody.appendChild(tr);
                 });
@@ -1882,7 +1882,7 @@
                     tr.innerHTML = `
                         <td class="p-3 text-sm leading-relaxed max-w-[500px]" title="Teks yang dianalisis: ${escAttr(row.clean_text)}">${row.raw_text || '-'}${row.skipped ? ` <span class="ml-1 text-xs opacity-70" title="${escAttr(row.skip_reason)}">⚠ Dilewati</span>` : ''}</td>
                         <td class="p-3 whitespace-nowrap font-semibold" style="color:${color}">${row.predicted_label || '-'}</td>
-                        <td class="p-3 whitespace-nowrap text-xs font-mono-code">${(row.confidence_positive||0).toFixed(2)} / ${(row.confidence_negative||0).toFixed(2)} / ${(row.confidence_neutral||0).toFixed(2)}</td>`;
+                        <td class="p-3 whitespace-nowrap text-xs font-mono-code">${((row.confidence_positive||0)*100).toFixed(2)}% / ${((row.confidence_negative||0)*100).toFixed(2)}% / ${((row.confidence_neutral||0)*100).toFixed(2)}%</td>`;
                     tbody.appendChild(tr);
                 });
 

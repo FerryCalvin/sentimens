@@ -5,53 +5,11 @@
 import re
 import unicodedata
 
-_RE_URL_HTTP   = re.compile(r"https?://\S+")
-_RE_URL_WWW    = re.compile(r"www\.\S+")
-_RE_MENTION    = re.compile(r"@\w+")
-_RE_HASHTAG    = re.compile(r"#(\w+)")
-_RE_NON_ALNUM  = re.compile(r"[^a-zA-Z0-9\s]")
+_RE_URL        = re.compile(r"http\S+|www\S+")
+_RE_MENTION    = re.compile(r"@[a-z0-9_]+")
+_RE_HASHTAG    = re.compile(r"#\w+")
+_RE_NON_ALPHA  = re.compile(r"[^a-z\s]")
 _RE_WHITESPACE = re.compile(r"\s+")
-
-
-def remove_urls(text: str) -> str:
-    """
-    FR-PP-01: Hapus semua URL dari teks.
-    Menghapus http://, https://, www., dan URL tanpa prefix.
-    """
-    # Hapus URL dengan protokol http/https
-    text = _RE_URL_HTTP.sub("", text)
-    # Hapus URL dengan www.
-    text = _RE_URL_WWW.sub("", text)
-    return text
-
-
-def remove_mentions(text: str) -> str:
-    """
-    FR-PP-02: Hapus mention pengguna (@username).
-    """
-    text = _RE_MENTION.sub("", text)
-    return text
-
-
-def remove_hashtag_symbol(text: str) -> str:
-    """
-    FR-PP-02: Hapus simbol # namun pertahankan kata di belakangnya.
-    Contoh: #BanggaIndonesia → BanggaIndonesia
-    """
-    text = _RE_HASHTAG.sub(r"\1", text)
-    return text
-
-
-def remove_special_characters(text: str) -> str:
-    """
-    FR-PP-03: Hapus karakter non-alfanumerik kecuali spasi.
-    Mempertahankan huruf, angka, dan spasi.
-    """
-    # Normalisasi karakter unicode (tangani emoji, karakter khusus)
-    text = unicodedata.normalize("NFKD", text)
-    # Hapus semua karakter selain huruf, angka, dan spasi
-    text = _RE_NON_ALNUM.sub(" ", text)
-    return text
 
 
 def to_lowercase(text: str) -> str:
@@ -59,6 +17,40 @@ def to_lowercase(text: str) -> str:
     FR-PP-04: Case folding — ubah seluruh teks ke huruf kecil.
     """
     return text.lower()
+
+
+def remove_urls(text: str) -> str:
+    """
+    FR-PP-01: Hapus semua URL dari teks (http, https, www).
+    """
+    return _RE_URL.sub("", text)
+
+
+def remove_mentions(text: str) -> str:
+    """
+    FR-PP-02: Hapus mention pengguna (@username).
+    """
+    return _RE_MENTION.sub("", text)
+
+
+def remove_hashtag_symbol(text: str) -> str:
+    """
+    FR-PP-02: Hapus tagar beserta kata di belakangnya (simbol # dan kata dihapus total).
+    Contoh: #BanggaIndonesia → (dihapus seluruhnya)
+    """
+    return _RE_HASHTAG.sub("", text)
+
+
+def remove_special_characters(text: str) -> str:
+    """
+    FR-PP-03: Hapus karakter non-alfabet (termasuk angka) kecuali spasi.
+    Mempertahankan huruf dan spasi saja.
+    """
+    # Normalisasi karakter unicode (tangani aksen/karakter khusus)
+    text = unicodedata.normalize("NFKD", text)
+    # Hapus semua karakter selain huruf dan spasi
+    text = _RE_NON_ALPHA.sub(" ", text)
+    return text
 
 
 def normalize_whitespace(text: str) -> str:
@@ -73,30 +65,30 @@ def normalize_whitespace(text: str) -> str:
 def preprocess_text(raw_text: str) -> str:
     """
     Pipeline praproses teks utama (FR-PP-01 s/d FR-PP-06).
-    
-    Urutan operasi dijaga ketat sesuai PRD section 6.2:
-    1. Hapus URL
-    2. Hapus @mention
-    3. Hapus simbol #
-    4. Hapus karakter khusus
-    5. Case folding
+
+    Urutan operasi dijaga ketat sesuai Tabel 4.7 skripsi:
+    1. Case folding
+    2. Hapus URL
+    3. Hapus @mention
+    4. Hapus tagar (simbol + kata)
+    5. Hapus karakter non-alfabet (termasuk angka)
     6. Normalisasi spasi
-    
+
     CATATAN: Stopword removal TIDAK dilakukan (FR-PP-06).
     Model BERT memanfaatkan konteks penuh kalimat.
-    
+
     Returns:
         str: Teks bersih yang siap ditokenisasi
     """
     if not raw_text or not isinstance(raw_text, str):
         return ""
-    
+
     text = raw_text
-    text = remove_urls(text)           # Step 1: Hapus URL
-    text = remove_mentions(text)       # Step 2: Hapus @mention
-    text = remove_hashtag_symbol(text) # Step 3: Hapus simbol #
-    text = remove_special_characters(text)  # Step 4: Hapus karakter khusus
-    text = to_lowercase(text)          # Step 5: Case folding
+    text = to_lowercase(text)          # Step 1: Case folding
+    text = remove_urls(text)           # Step 2: Hapus URL
+    text = remove_mentions(text)       # Step 3: Hapus @mention
+    text = remove_hashtag_symbol(text) # Step 4: Hapus tagar (simbol + kata)
+    text = remove_special_characters(text)  # Step 5: Hapus karakter non-alfabet
     text = normalize_whitespace(text)  # Step 6: Normalisasi spasi
     # TIDAK ada stopword removal (FR-PP-06)
     return text

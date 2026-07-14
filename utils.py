@@ -558,20 +558,35 @@ def get_timeline_data(df: pd.DataFrame, days: int | None = None, granularity: st
 
 
 def compute_confidence_avg(df: pd.DataFrame) -> dict:
-    """Rata-rata confidence per kelas (dalam persen). Dipakai oleh JSON API dan export laporan."""
-    def safe_mean_pct(series):
-        if series.empty:
+    """
+    Rata-rata confidence PER KELAS (dalam persen), dihitung hanya dari baris yang
+    memang diprediksi sebagai kelas tersebut (conditional mean) -- bukan dari skor
+    kelas itu di seluruh baris data. Dipakai oleh JSON API dan export laporan.
+    """
+    label_col_map = {
+        "positive": ("Positif", "confidence_positif"),
+        "neutral":  ("Netral",  "confidence_netral"),
+        "negative": ("Negatif", "confidence_negatif"),
+    }
+
+    def safe_mean_pct(subset):
+        if subset.empty:
             return 0.0
-        val = series.mean()
+        val = subset.mean()
         if pd.isna(val):
             return 0.0
         return round(float(val) * 100, 1)
 
-    return {
-        "positive": safe_mean_pct(df["confidence_positif"]) if "confidence_positif" in df.columns else 0.0,
-        "neutral":  safe_mean_pct(df["confidence_netral"])  if "confidence_netral"  in df.columns else 0.0,
-        "negative": safe_mean_pct(df["confidence_negatif"]) if "confidence_negatif" in df.columns else 0.0,
-    }
+    if "sentimen" not in df.columns:
+        return {key: 0.0 for key in label_col_map}
+
+    result = {}
+    for key, (label, col) in label_col_map.items():
+        if col not in df.columns:
+            result[key] = 0.0
+            continue
+        result[key] = safe_mean_pct(df.loc[df["sentimen"] == label, col])
+    return result
 
 
 def get_top_items(df: pd.DataFrame, n: int = 100) -> list:
