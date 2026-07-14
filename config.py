@@ -67,6 +67,8 @@ CSV_OUTPUT_COLUMNS = [
     "confidence_netral",
     "source",
     "date",
+    "dilewati",
+    "alasan_dilewati",
 ]
 
 # --- Model Evaluation Metrics (hasil testing model augmented pada test set, n=2173) ---

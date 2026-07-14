@@ -223,6 +223,7 @@ def _build_results_payload(req_id: str, days: int | None = None) -> dict:
     for item in top_items_raw:
         top_items.append({
             "raw_text":            item.get("teks_asli", ""),
+            "clean_text":          item.get("teks_bersih", ""),
             "source":              item.get("source", ""),
             "date":                str(item.get("date", "")),
             "predicted_label":     item.get("sentimen", ""),
@@ -230,6 +231,8 @@ def _build_results_payload(req_id: str, days: int | None = None) -> dict:
             "confidence_negative": float(item.get("confidence_negatif", 0)),
             "confidence_neutral":  float(item.get("confidence_netral", 0)),
             "confidence_overall":  float(item.get("confidence", 0)),
+            "skipped":             bool(item.get("dilewati", False)),
+            "skip_reason":         item.get("alasan_dilewati", ""),
         })
 
     confidence_avg = compute_confidence_avg(df)
@@ -272,6 +275,7 @@ def _run_scrape_job(job_id: str, keyword: str, limit: int, sources: list, mode: 
         payload["expanded_keyword"] = pipeline_result.get("expanded_keyword", pipeline_result["keyword"])
         payload["plain_keyword"] = pipeline_result.get("plain_keyword", pipeline_result["keyword"])
         payload["expansion_status"] = pipeline_result.get("expansion_status", "unknown")
+        payload["outlier_stats"] = pipeline_result.get("outlier_stats")
         job_store.update_job(job_id, status="done", stage="done", percent=100, message="Selesai", result=payload)
     except Exception as e:
         logger.error(f"/api/scrape pipeline error: {e}", exc_info=True)
@@ -290,6 +294,7 @@ def api_scrape():
         return jsonify({"error": "Kata kunci tidak boleh kosong."}), 400
 
     keyword = str(escape(keyword))
+    logger.info(f"[api_scrape] keyword diterima: {keyword!r} (len={len(keyword)})")
     try:
         limit = int(body.get("limit", DEFAULT_SCRAPE_LIMIT))
         limit = max(10, min(limit, 500))
@@ -309,7 +314,7 @@ def api_scrape():
     threading.Thread(
         target=_run_scrape_job, args=(job_id, keyword, limit, sources, mode, days_back), daemon=True
     ).start()
-    return jsonify({"job_id": job_id, "status": "queued"}), 202
+    return jsonify({"job_id": job_id, "status": "queued", "keyword": keyword}), 202
 
 
 @app.route("/api/scrape/status/<job_id>", methods=["GET"])
@@ -428,7 +433,7 @@ def api_evaluate():
     if df.empty:
         return jsonify({"error": "Tidak ada baris valid setelah filtering label."}), 400
 
-    texts = [t[:1000] for t in df["teks_asli"].astype(str).tolist()]
+    texts = [preprocess_text(t)[:1000] for t in df["teks_asli"].astype(str).tolist()]
     true_labels = df["label_asli"].astype(str).tolist()
 
     predictions = predict_batch(texts)

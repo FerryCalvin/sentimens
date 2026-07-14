@@ -30,6 +30,14 @@ def _stat_key(file_path: str) -> tuple[float, int] | None:
     except OSError:
         return None
 
+
+def _available_output_columns(file_path: str) -> list[str]:
+    """Intersect CSV_OUTPUT_COLUMNS with a file's actual header, so older result
+    CSVs written before new columns existed (e.g. 'dilewati') still load fine."""
+    with open(file_path, encoding="utf-8-sig") as f:
+        header = next(csv.reader(f))
+    return [c for c in CSV_OUTPUT_COLUMNS if c in header]
+
 CSV_DTYPES = {
     "teks_asli": "string",
     "teks_bersih": "string",
@@ -120,6 +128,72 @@ def detect_text_column(df: pd.DataFrame) -> str | None:
     return df.columns[0] if len(df.columns) > 0 else None
 
 
+def remove_outliers_and_duplicates(items: list[dict], text_key: str = "raw_text") -> tuple[list[dict], dict]:
+    """
+    Bersihkan hasil scraping mentah dari duplikat dan outlier sebelum masuk ke pipeline
+    preprocessing/inferensi.
+
+    Menangani tiga kondisi umum data hasil scraping yang "kotor":
+    1. Duplikat: retweet/repost dengan teks identik (dibandingkan setelah normalisasi
+       strip + lowercase), kemunculan pertama yang dipertahankan.
+    2. Teks kosong/terlalu pendek: fragmen yang gagal ke-scrape dengan benar (< 3 karakter).
+    3. Outlier panjang teks: dideteksi dengan metode IQR (Q1 - 1.5*IQR s/d Q3 + 1.5*IQR)
+       pada panjang karakter, menangkap fragmen yang rusak (terlalu pendek) atau teks yang
+       tercampur/berlebihan (terlalu panjang) dibanding mayoritas hasil scraping. Langkah ini
+       hanya dijalankan jika data tersisa >= 20 baris, karena IQR tidak reliabel pada sampel kecil.
+
+    Returns:
+        (filtered_items, stats) — stats berisi jumlah baris yang dibuang per kategori.
+    """
+    total_before = len(items)
+
+    seen = set()
+    deduped = []
+    duplicates_removed = 0
+    for item in items:
+        norm = str(item.get(text_key, "")).strip().lower()
+        if norm and norm in seen:
+            duplicates_removed += 1
+            continue
+        seen.add(norm)
+        deduped.append(item)
+
+    non_empty = []
+    empty_removed = 0
+    for item in deduped:
+        if len(str(item.get(text_key, "")).strip()) < 3:
+            empty_removed += 1
+            continue
+        non_empty.append(item)
+
+    outliers_removed = 0
+    final_items = non_empty
+    if len(non_empty) >= 20:
+        lengths = sorted(len(str(item.get(text_key, "")).strip()) for item in non_empty)
+        q1 = lengths[int(len(lengths) * 0.25)]
+        q3 = lengths[int(len(lengths) * 0.75)]
+        iqr = q3 - q1
+        lower_bound = q1 - 1.5 * iqr
+        upper_bound = q3 + 1.5 * iqr
+
+        final_items = []
+        for item in non_empty:
+            length = len(str(item.get(text_key, "")).strip())
+            if length < lower_bound or length > upper_bound:
+                outliers_removed += 1
+                continue
+            final_items.append(item)
+
+    stats = {
+        "duplicates_removed": duplicates_removed,
+        "empty_removed": empty_removed,
+        "outliers_removed": outliers_removed,
+        "total_before": total_before,
+        "total_after": len(final_items),
+    }
+    return final_items, stats
+
+
 def generate_csv_output(results: list[dict]) -> str:
     """
     FR-BT-05: Generate CSV hasil analisis batch.
@@ -150,6 +224,8 @@ def generate_csv_output(results: list[dict]) -> str:
             "confidence_netral": round(float(result.get("confidence_neutral", 0.0) or 0.0), 6),
             "source": result.get("source", ""),
             "date": result.get("date", ""),
+            "dilewati": result.get("skipped", False),
+            "alasan_dilewati": result.get("skip_reason", ""),
         })
     
     return output.getvalue()
@@ -169,7 +245,7 @@ def load_results_from_csv(file_path: str) -> list[dict]:
         df = pd.read_csv(
             file_path,
             dtype=CSV_DTYPES,
-            usecols=CSV_OUTPUT_COLUMNS,
+            usecols=_available_output_columns(file_path),
             engine='c'
         )
         df = df.rename(columns={
@@ -179,6 +255,8 @@ def load_results_from_csv(file_path: str) -> list[dict]:
             "confidence_positif": "confidence_positive",
             "confidence_negatif": "confidence_negative",
             "confidence_netral": "confidence_neutral",
+            "dilewati": "skipped",
+            "alasan_dilewati": "skip_reason",
         })
         # "predicted_label" is read as category dtype (CSV_DTYPES) — a category column
         # can't be filled with a value outside its observed categories (e.g. a small
@@ -195,12 +273,14 @@ def load_results_from_csv(file_path: str) -> list[dict]:
             "confidence_neutral": 0.0,
             "source": "",
             "date": "",
+            "skipped": False,
+            "skip_reason": "",
         })
         results = df.to_dict('records')
         _NULL_STRINGS = {'nan', 'NaT', '<NA>'}
         for r in results:
             # Text/date/source: also strip string sentinels emitted by Pandas
-            for k in ["raw_text", "clean_text", "predicted_label", "source", "date"]:
+            for k in ["raw_text", "clean_text", "predicted_label", "source", "date", "skip_reason"]:
                 val = r.get(k)
                 if val is None:
                     r[k] = ""
@@ -214,6 +294,7 @@ def load_results_from_csv(file_path: str) -> list[dict]:
                 val = r.get(k)
                 if not isinstance(val, str) and (val is None or pd.isna(val)):
                     r[k] = 0.0
+            r["skipped"] = bool(r.get("skipped", False))
 
         _results_cache[file_path] = (stat_key, results)
         if len(_results_cache) > _CACHE_MAX_SIZE:
@@ -303,7 +384,7 @@ def load_dataframe(request_id: str) -> pd.DataFrame:
     return pd.read_csv(
         path,
         dtype=CSV_DTYPES,
-        usecols=["teks_asli", "teks_bersih", "sentimen", "confidence_positif", "confidence_negatif", "confidence_netral", "source", "date"],
+        usecols=_available_output_columns(path),
         parse_dates=['date'],
         engine='c'
     )
@@ -506,8 +587,9 @@ def get_top_items(df: pd.DataFrame, n: int = 100) -> list:
     ]].max(axis=1)
 
     cols = []
-    for c in ['teks_asli', 'source', 'date', 'sentimen',
-              'confidence_positif', 'confidence_negatif', 'confidence_netral', 'confidence']:
+    for c in ['teks_asli', 'teks_bersih', 'source', 'date', 'sentimen',
+              'confidence_positif', 'confidence_negatif', 'confidence_netral', 'confidence',
+              'dilewati', 'alasan_dilewati']:
         if c in df.columns:
             cols.append(c)
 

@@ -10,8 +10,8 @@ from config import (
     INFERENCE_TIMEOUT_PER_ITEM_SEC, INFERENCE_TIMEOUT_MIN_SEC, INFERENCE_TIMEOUT_MAX_SEC,
 )
 from inference import predict_batch
-from preprocessing import preprocess_text
-from utils import generate_csv_output, calculate_summary
+from preprocessing import preprocess_text, is_valid_text
+from utils import generate_csv_output, calculate_summary, remove_outliers_and_duplicates
 
 logger = logging.getLogger(__name__)
 
@@ -107,16 +107,7 @@ def _scrape_in_process(keyword: str, limit: int, sources: list, progress_cb=None
                 if progress_cb:
                     progress_cb(done_count, len(need_sources))
 
-    # Deduplicate
-    seen = set()
-    unique = []
-    for item in results:
-        t = item.get("raw_text", "")[:80]
-        if t and t not in seen:
-            seen.add(t)
-            unique.append(item)
-
-    return unique[:limit]
+    return results
 
 
 def _fallback_pred() -> dict:
@@ -126,6 +117,18 @@ def _fallback_pred() -> dict:
         "confidence_negative": 0.333,
         "confidence_neutral": 0.334,
         "inference_time_ms": 0.0,
+    }
+
+
+def _skipped_pred() -> dict:
+    return {
+        "predicted_label": "Netral",
+        "confidence_positive": 0.0,
+        "confidence_negative": 0.0,
+        "confidence_neutral": 0.0,
+        "inference_time_ms": 0.0,
+        "skipped": True,
+        "skip_reason": "Dilewati: konten tidak cukup setelah pembersihan",
     }
 
 
@@ -165,6 +168,17 @@ def _predict_all(clean_texts: list[str], progress_cb=None) -> list[dict]:
         logger.error(f"[Inference] Gagal: {e}", exc_info=True)
         pool.shutdown(wait=False)
         return [_fallback_pred() for _ in clean_texts]
+
+
+def _predict_valid_only(clean_texts: list[str], progress_cb=None) -> list[dict]:
+    """Hanya kirim teks yang lolos is_valid_text() (min_chars=3) ke model;
+    sisanya ditandai skip tanpa memanggil model sama sekali."""
+    valid_idx = [i for i, t in enumerate(clean_texts) if is_valid_text(t)]
+    valid_preds = _predict_all([clean_texts[i] for i in valid_idx], progress_cb=progress_cb)
+    predictions = [_skipped_pred() for _ in clean_texts]
+    for idx, pred in zip(valid_idx, valid_preds):
+        predictions[idx] = pred
+    return predictions
 
 
 def run_scrape_pipeline(
@@ -236,6 +250,37 @@ def run_scrape_pipeline(
             "expansion_status": expansion_status,
         }
 
+    data, outlier_stats = remove_outliers_and_duplicates(data, text_key="raw_text")
+    data = data[:limit]
+    logger.info(
+        f"[Pipeline] Filter data mentah: {outlier_stats['total_before']} -> {outlier_stats['total_after']} "
+        f"(duplikat={outlier_stats['duplicates_removed']}, kosong={outlier_stats['empty_removed']}, "
+        f"outlier={outlier_stats['outliers_removed']})"
+    )
+    progress_cb(
+        "filtering", 52,
+        f"Menyaring {outlier_stats['duplicates_removed']} duplikat & "
+        f"{outlier_stats['outliers_removed']} outlier...",
+    )
+
+    if not data:
+        logger.warning(f"[Pipeline] Seluruh data untuk '{keyword}' tersaring sebagai duplikat/outlier")
+        empty_csv = generate_csv_output([])
+        file_path = DATA_DIR / f"{req_id}.csv"
+        with open(file_path, "w", encoding="utf-8-sig", newline="") as f:
+            f.write(empty_csv)
+        return {
+            "req_id": req_id,
+            "total_results": 0,
+            "file_path": str(file_path),
+            "summary": {"Positif": 0, "Negatif": 0, "Netral": 0, "total": 0},
+            "keyword": keyword,
+            "expanded_keyword": expanded_keyword,
+            "plain_keyword": plain_keyword,
+            "expansion_status": expansion_status,
+            "outlier_stats": outlier_stats,
+        }
+
     raw_texts    = [t.get("raw_text", "") for t in data]
     dates        = [t.get("date",     "") for t in data]
     sources_list = [t.get("source",   "") for t in data]
@@ -244,13 +289,16 @@ def run_scrape_pipeline(
     clean_texts  = [preprocess_text(text)[:1000] for text in raw_texts]  # cap: cegah tokenizer hang
     progress_cb("preprocessing", 60, "Praproses selesai.")
 
+    for i, (raw, clean) in enumerate(zip(raw_texts[:5], clean_texts[:5])):
+        logger.info(f"[Pipeline][Sample {i+1}] raw={raw[:80]!r} -> clean={clean[:80]!r}")
+
     def _infer_cb(done: int, total: int) -> None:
         pct = 60 + int(40 * done / total) if total else 100
         progress_cb("predicting", pct, f"Menganalisis sentimen ({done}/{total})...")
 
     logger.info(f"[Pipeline] Menganalisis sentimen untuk {len(clean_texts)} item...")
     t0 = time.perf_counter()
-    predictions = _predict_all(clean_texts, progress_cb=_infer_cb)
+    predictions = _predict_valid_only(clean_texts, progress_cb=_infer_cb)
     logger.info(f"[Pipeline] Inferensi selesai dalam {(time.perf_counter() - t0) * 1000:.0f}ms")
 
     results = []
@@ -265,6 +313,8 @@ def run_scrape_pipeline(
             "confidence_negative": pred.get("confidence_negative", 0.0),
             "confidence_neutral":  pred.get("confidence_neutral",  0.0),
             "inference_time_ms":   pred.get("inference_time_ms",   0.0),
+            "skipped":             pred.get("skipped", False),
+            "skip_reason":         pred.get("skip_reason", ""),
         })
 
     csv_content = generate_csv_output(results)
@@ -285,6 +335,7 @@ def run_scrape_pipeline(
         "expanded_keyword": expanded_keyword,
         "plain_keyword": plain_keyword,
         "expansion_status": expansion_status,
+        "outlier_stats": outlier_stats,
     }
 
 
@@ -299,19 +350,19 @@ def run_batch_pipeline(raw_texts: list[str], req_id: str | None = None, progress
     ]
     progress_cb("preprocessing", 10, "Praproses selesai.")
 
+    for i, (raw, clean) in enumerate(zip(raw_texts[:5], clean_texts[:5])):
+        logger.info(f"[Batch][Sample {i+1}] raw={str(raw)[:80]!r} -> clean={clean[:80]!r}")
+
     def _infer_cb(done: int, total: int) -> None:
         pct = 10 + int(90 * done / total) if total else 100
         progress_cb("predicting", pct, f"Menganalisis sentimen ({done}/{total})...")
 
     logger.info(f"[Batch] Menganalisis sentimen untuk {len(clean_texts)} baris...")
-    predictions = _predict_all(clean_texts, progress_cb=_infer_cb)
+    predictions = _predict_valid_only(clean_texts, progress_cb=_infer_cb)
 
     results = []
     for raw, clean, pred in zip(raw_texts, clean_texts, predictions):
         raw_str = str(raw).strip()
-        is_empty = not raw_str or not clean
-        if is_empty:
-            pred["skipped"] = True
         results.append({
             "raw_text": raw_str,
             "clean_text": clean,
@@ -321,6 +372,7 @@ def run_batch_pipeline(raw_texts: list[str], req_id: str | None = None, progress
             "confidence_neutral": pred.get("confidence_neutral", 0.0),
             "inference_time_ms": pred.get("inference_time_ms", 0.0),
             "skipped": pred.get("skipped", False),
+            "skip_reason": pred.get("skip_reason", ""),
         })
 
     csv_content = generate_csv_output(results)

@@ -1269,6 +1269,9 @@
 // =============================================================
 (function() {
 
+    // Escape untuk atribut HTML (title tooltip clean_text/skip_reason)
+    const escAttr = s => String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+
     // isPrecomputedView must be at IIFE scope so the analyze-btn handler can access it
     let isPrecomputedView = false;
     // Bridge to auto-populate eval panel from training metrics; set by the eval IIFE below
@@ -1281,6 +1284,13 @@
     const _topicInput = document.getElementById('topic-input');
     const _analysisTitle = document.getElementById('analysis-title');
     const _analysisStatus = document.getElementById('analysis-status');
+
+    // Decode entitas HTML yang dihasilkan markupsafe.escape() di backend (app.py),
+    // supaya topik yang mengandung & < > ' " tidak salah dianggap "mismatch".
+    function _decodeEscaped(s) {
+        return String(s).replace(/&amp;/g, '&').replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>').replace(/&#39;/g, "'").replace(/&#34;/g, '"');
+    }
 
     if (_analyzeBtn && _topicInput) {
         // Hapus event listener lama dan pasang yang baru
@@ -1319,6 +1329,19 @@
                 const queueData = await queueRes.json();
                 if (!queueRes.ok) throw new Error(queueData.error || 'Gagal memulai analisis');
 
+                // Guard: pastikan topik yang benar-benar diproses sistem sama dengan
+                // yang diketik user. Jika berbeda (mis. karena gangguan di sisi
+                // browser), batalkan sebelum scraping berjalan alih-alih diam-diam
+                // menampilkan hasil untuk topik yang salah.
+                if (queueData.keyword !== undefined && _decodeEscaped(queueData.keyword) !== text) {
+                    console.warn(`[Keyword mismatch] typed=${JSON.stringify(text)} system=${JSON.stringify(queueData.keyword)}`);
+                    alert(`Topik yang diproses sistem ("${queueData.keyword}") berbeda dari yang Anda masukkan ("${text}"). Analisis dibatalkan — silakan coba lagi.`);
+                    newBtn.innerHTML = origHTML;
+                    newBtn.disabled = false;
+                    showView('landing');
+                    return;
+                }
+
                 const finalData = await new Promise((resolve, reject) => {
                     pollTimer = setInterval(async () => {
                         try {
@@ -1354,8 +1377,12 @@
                 }
 
                 if (_analysisTitle)  _analysisTitle.textContent  = `Analysis: ${text}`;
-                if (_analysisStatus) _analysisStatus.textContent =
-                    `Done - Total: ${finalData.total_results} data - Time: ${new Date().toLocaleTimeString()}`;
+                let _statusText = `Done - Total: ${finalData.total_results} data - Time: ${new Date().toLocaleTimeString()}`;
+                const _ostats = finalData.outlier_stats;
+                if (_ostats && (_ostats.duplicates_removed + _ostats.outliers_removed + _ostats.empty_removed) > 0) {
+                    _statusText += ` (disaring: ${_ostats.duplicates_removed} duplikat, ${_ostats.outliers_removed} outlier, ${_ostats.empty_removed} kosong dari ${_ostats.total_before} data mentah)`;
+                }
+                if (_analysisStatus) _analysisStatus.textContent = _statusText;
                 const badge = document.getElementById('demo-badge');
                 if (badge) badge.classList.add('hidden');
                 const toggleBtn = document.getElementById('toggle-view-btn');
@@ -1668,7 +1695,7 @@
                     tr.innerHTML = `
                         <td class="p-3 whitespace-nowrap text-xs text-on-surface/60">${row.date || '-'}</td>
                         <td class="p-3 whitespace-nowrap text-xs font-mono-code">${row.source || '-'}</td>
-                        <td class="p-3 text-sm leading-relaxed">${row.raw_text || row.text || '-'}</td>
+                        <td class="p-3 text-sm leading-relaxed" title="Teks yang dianalisis: ${escAttr(row.clean_text)}">${row.raw_text || row.text || '-'}${row.skipped ? ` <span class="ml-1 text-xs opacity-70" title="${escAttr(row.skip_reason)}">⚠ Dilewati</span>` : ''}</td>
                         <td class="p-3 whitespace-nowrap font-semibold" style="color: ${labelColor}">${row.predicted_label || '-'}</td>
                         <td class="p-3 whitespace-nowrap text-xs font-mono-code">${(row.confidence_positive || 0).toFixed(2)} / ${(row.confidence_negative || 0).toFixed(2)} / ${(row.confidence_neutral || 0).toFixed(2)}</td>
                         <td class="p-3 whitespace-nowrap text-xs font-mono-code font-semibold text-primary">${(((row.confidence_overall || row.confidence || 0) * 100)).toFixed(1)}%</td>
@@ -1827,10 +1854,11 @@
             const summaryEl = document.getElementById('batch-summary');
             const s = data.summary || {};
             summaryEl.innerHTML = [
-                { label: 'Total',   val: data.total_results || 0, color: '#c5c6cd' },
-                { label: 'Positif', val: s.positif           || 0, color: '#d9e2ff' },
-                { label: 'Netral',  val: s.netral             || 0, color: '#515f78' },
-                { label: 'Negatif', val: s.negatif            || 0, color: '#ffb4ab' },
+                { label: 'Total',    val: data.total_results || 0, color: '#c5c6cd' },
+                { label: 'Positif',  val: s.positif           || 0, color: '#d9e2ff' },
+                { label: 'Netral',   val: s.netral             || 0, color: '#515f78' },
+                { label: 'Negatif',  val: s.negatif            || 0, color: '#ffb4ab' },
+                { label: 'Dilewati', val: s.invalid            || 0, color: '#8b8f9c' },
             ].map(({ label, val, color }) =>
                 `<div class="px-4 py-2 rounded-lg border border-outline-variant/20 text-center min-w-[90px]">
                    <div class="text-lg font-semibold" style="color:${color}">${val}</div>
@@ -1852,7 +1880,7 @@
                     const tr    = document.createElement('tr');
                     tr.className = 'hover:bg-on-surface/5 transition-colors';
                     tr.innerHTML = `
-                        <td class="p-3 text-sm leading-relaxed max-w-[500px]">${row.raw_text || '-'}</td>
+                        <td class="p-3 text-sm leading-relaxed max-w-[500px]" title="Teks yang dianalisis: ${escAttr(row.clean_text)}">${row.raw_text || '-'}${row.skipped ? ` <span class="ml-1 text-xs opacity-70" title="${escAttr(row.skip_reason)}">⚠ Dilewati</span>` : ''}</td>
                         <td class="p-3 whitespace-nowrap font-semibold" style="color:${color}">${row.predicted_label || '-'}</td>
                         <td class="p-3 whitespace-nowrap text-xs font-mono-code">${(row.confidence_positive||0).toFixed(2)} / ${(row.confidence_negative||0).toFixed(2)} / ${(row.confidence_neutral||0).toFixed(2)}</td>`;
                     tbody.appendChild(tr);
