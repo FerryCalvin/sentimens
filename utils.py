@@ -4,6 +4,7 @@
 import io
 import os
 import csv
+import re
 import logging
 from collections import Counter, OrderedDict
 
@@ -192,6 +193,124 @@ def remove_outliers_and_duplicates(items: list[dict], text_key: str = "raw_text"
         "total_after": len(final_items),
     }
     return final_items, stats
+
+
+# Handle (lowercase, tanpa "@") akun media besar Indonesia yang lazim muncul
+# di Twitter/Threads — dipakai untuk menyaring repost berita dari source Threads
+# (author tersedia). Gampang ditambah kalau ada akun media lain yang lolos.
+KNOWN_NEWS_ACCOUNTS = frozenset({
+    "detikcom", "kompascom", "cnnindonesia", "tempodotco", "tribunnews",
+    "liputan6dotcom", "antaranews", "sindonews", "republikaonline", "vivacoid",
+    "merdekadotcom", "okezonedotcom", "kumparan", "suaradotcom", "mediaindonesia",
+    "cnbcindonesia", "bisniscom", "katadatacoid", "beritasatu", "jawapos",
+})
+
+# Pola heuristik gaya bahasa berita/auto-repost media — dipakai untuk menyaring
+# source Twitter & Threads (yang seharusnya berisi opini asli warganet, bukan
+# konten media). Best-effort: tidak menjamin presisi 100%.
+_NEWS_STYLE_PATTERNS = [
+    re.compile(
+        r"^(detikcom|kompas\.com|tribunnews\.com|liputan6\.com|cnn\s?indonesia|"
+        r"antara\s?news|republika\.co\.id|suara\.com|sindonews\.com|merdeka\.com|"
+        r"okezone\.com|viva\.co\.id|tempo\.co|kumparan\.com|cnbc\s?indonesia|"
+        r"bisnis\.com|katadata\.co\.id|beritasatu|jawapos)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"^[A-Z]{3,}\s*[-–—,]\s"),  # dateline gaya artikel, mis. "JAKARTA -"
+    re.compile(
+        r"\b(baca juga|selengkapnya|klik di sini|simak video|sumber:|editor:|reporter:|foto:|breaking news)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"^[A-Z][\w.]*(\s[A-Z][\w.]*){0,3}:\s"),  # "Nama/Jabatan: kutipan berita"
+    re.compile(r"\bkepala negara\b", re.IGNORECASE),  # epitet jurnalistik untuk presiden
+    re.compile(r"\bdalam kunjungan kerja(nya)?\b", re.IGNORECASE),
+    re.compile(r"\bdalam (keterangan (pers|resminya)|sambutannya|pidatonya)\b", re.IGNORECASE),
+    # Konstruksi pasif formal ala rilis pers, mis. "ditegaskan oleh Presiden ..."
+    re.compile(r"\b(ditegaskan|dinyatakan|diungkapkan|disampaikan|ditekankan|disoroti)\s+(oleh\s+)?presiden\b", re.IGNORECASE),
+]
+
+# Kata sambung/depan pendek yang lazim dibiarkan huruf kecil di Title Case —
+# dikecualikan dari perhitungan rasio kapitalisasi supaya tidak salah menghitung.
+_MINOR_WORDS = frozenset({
+    "di", "ke", "dari", "yang", "atas", "oleh", "untuk", "dan", "atau", "ini", "itu",
+    "jika", "pada", "dalam", "dengan", "akan", "juga", "bagi", "tanpa", "antara", "agar",
+    "the", "of", "in", "to", "for", "and", "or", "a", "an", "is", "this", "if", "as",
+    "with", "by", "on", "at", "its", "it", "are", "was", "be",
+})
+
+
+def _is_title_case_headline(text: str) -> bool:
+    """
+    Heuristik struktural: judul berita/repost bot media biasanya ditulis Title Case
+    (hampir semua kata berawalan huruf besar), berbeda dari opini warganet yang
+    umumnya campuran huruf kecil informal. Kata sambung pendek & hashtag/mention
+    dikecualikan dari perhitungan supaya tidak bias.
+    """
+    words = [w.strip(".,!?:;\"'()[]") for w in text.split()]
+    words = [w for w in words if w and not w.startswith(("#", "@", "http"))]
+    major_words = [w for w in words if w.lower() not in _MINOR_WORDS and w[0].isalpha()]
+    if len(major_words) < 5:
+        return False
+    capitalized = sum(1 for w in major_words if w[0].isupper())
+    return (capitalized / len(major_words)) >= 0.8
+
+
+def is_news_style_text(text: str) -> bool:
+    """
+    Heuristik: True kalau teks kemungkinan besar bergaya berita/auto-repost media
+    (bukan opini asli warganet). Best-effort, bukan filter sempurna.
+    """
+    text = str(text or "").strip()
+    if not text:
+        return False
+    if len(text) > 80 and text.endswith("..."):
+        return True
+    if any(pattern.search(text) for pattern in _NEWS_STYLE_PATTERNS):
+        return True
+    return _is_title_case_headline(text)
+
+
+def filter_news_style_content(items: list[dict], text_key: str = "raw_text") -> tuple[list[dict], dict]:
+    """
+    Saring konten bergaya berita dari source Twitter & Threads.
+
+    Source lain (mis. web/berita) dilewatkan apa adanya — source itu memang
+    dimaksudkan berisi berita. Untuk Twitter & Threads:
+    1. Threads dari akun media dikenal (KNOWN_NEWS_ACCOUNTS) dibuang.
+    2. Sisanya dicek pola gaya bahasa berita (is_news_style_text) dan dibuang jika cocok.
+
+    Returns:
+        (filtered_items, stats)
+    """
+    total_before = len(items)
+    news_account_removed = 0
+    news_style_removed = 0
+    kept = []
+
+    for item in items:
+        source = item.get("source", "")
+        if source not in ("twitter", "threads"):
+            kept.append(item)
+            continue
+
+        author = str(item.get("author", "")).strip().lstrip("@").lower()
+        if source == "threads" and author and author in KNOWN_NEWS_ACCOUNTS:
+            news_account_removed += 1
+            continue
+
+        if is_news_style_text(item.get(text_key, "")):
+            news_style_removed += 1
+            continue
+
+        kept.append(item)
+
+    stats = {
+        "news_account_removed": news_account_removed,
+        "news_style_removed": news_style_removed,
+        "total_before": total_before,
+        "total_after": len(kept),
+    }
+    return kept, stats
 
 
 def generate_csv_output(results: list[dict]) -> str:

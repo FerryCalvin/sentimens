@@ -1379,8 +1379,12 @@
                 if (_analysisTitle)  _analysisTitle.textContent  = `Analysis: ${text}`;
                 let _statusText = `Done - Total: ${finalData.total_results} data - Time: ${new Date().toLocaleTimeString()}`;
                 const _ostats = finalData.outlier_stats;
-                if (_ostats && (_ostats.duplicates_removed + _ostats.outliers_removed + _ostats.empty_removed) > 0) {
-                    _statusText += ` (disaring: ${_ostats.duplicates_removed} duplikat, ${_ostats.outliers_removed} outlier, ${_ostats.empty_removed} kosong dari ${_ostats.total_before} data mentah)`;
+                if (_ostats) {
+                    const _newsAccount = _ostats.news_account_removed || 0;
+                    const _newsStyle = _ostats.news_style_removed || 0;
+                    if ((_ostats.duplicates_removed + _ostats.outliers_removed + _ostats.empty_removed + _newsAccount + _newsStyle) > 0) {
+                        _statusText += ` (disaring: ${_ostats.duplicates_removed} duplikat, ${_ostats.outliers_removed} outlier, ${_ostats.empty_removed} kosong, ${_newsAccount + _newsStyle} gaya berita dari ${_ostats.total_before} data mentah)`;
+                    }
                 }
                 if (_analysisStatus) _analysisStatus.textContent = _statusText;
                 const badge = document.getElementById('demo-badge');

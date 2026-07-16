@@ -308,6 +308,7 @@ def _walk_posts(obj, posts: dict, search_url: str) -> None:
                         "raw_text": text.strip(),
                         "date":     date_str,
                         "url":      url,
+                        "author":   user,
                     }
         for v in obj.values():
             _walk_posts(v, posts, search_url)

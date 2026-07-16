@@ -11,7 +11,7 @@ from config import (
 )
 from inference import predict_batch
 from preprocessing import preprocess_text, is_valid_text
-from utils import generate_csv_output, calculate_summary, remove_outliers_and_duplicates
+from utils import generate_csv_output, calculate_summary, remove_outliers_and_duplicates, filter_news_style_content
 
 logger = logging.getLogger(__name__)
 
@@ -251,16 +251,24 @@ def run_scrape_pipeline(
         }
 
     data, outlier_stats = remove_outliers_and_duplicates(data, text_key="raw_text")
+
+    data, news_stats = filter_news_style_content(data)
+    outlier_stats["news_account_removed"] = news_stats["news_account_removed"]
+    outlier_stats["news_style_removed"] = news_stats["news_style_removed"]
+    outlier_stats["total_after"] = news_stats["total_after"]
+
     data = data[:limit]
     logger.info(
         f"[Pipeline] Filter data mentah: {outlier_stats['total_before']} -> {outlier_stats['total_after']} "
         f"(duplikat={outlier_stats['duplicates_removed']}, kosong={outlier_stats['empty_removed']}, "
-        f"outlier={outlier_stats['outliers_removed']})"
+        f"outlier={outlier_stats['outliers_removed']}, akun_berita={outlier_stats['news_account_removed']}, "
+        f"gaya_berita={outlier_stats['news_style_removed']})"
     )
     progress_cb(
         "filtering", 52,
-        f"Menyaring {outlier_stats['duplicates_removed']} duplikat & "
-        f"{outlier_stats['outliers_removed']} outlier...",
+        f"Menyaring {outlier_stats['duplicates_removed']} duplikat, "
+        f"{outlier_stats['outliers_removed']} outlier, dan "
+        f"{outlier_stats['news_account_removed'] + outlier_stats['news_style_removed']} konten berita...",
     )
 
     if not data:
