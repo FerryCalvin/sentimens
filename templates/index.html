@@ -12,7 +12,7 @@
 <script>
   window.APP_CONFIG = {
     limit:    parseInt("{{ default_limit }}", 10) || 200,
-    daysBack: parseInt("{{ default_days_back }}", 10) || 7
+    daysBack: parseInt("{{ default_days_back }}", 10) || 365
   };
 </script>
 <script id="tailwind-config">
@@ -286,6 +286,7 @@
 
         .chart-container {
             background: rgba(7, 18, 42, 0.6);
+            -webkit-backdrop-filter: blur(10px);
             backdrop-filter: blur(10px);
             border: 1px solid rgba(217, 226, 255, 0.1);
             border-radius: 0.5rem;
@@ -380,6 +381,25 @@
             transition: transform 0.1s ease-out;
             transform-style: preserve-3d;
         }
+
+        .initial-hidden {
+            display: none;
+        }
+
+        .glass-panel-dark {
+            background: rgba(7, 18, 42, 0.92);
+        }
+
+        .hide-important {
+            display: none !important;
+        }
+
+        #interactive-cranium {
+            background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuAUtfhZ6Rl6vtqzC4jZYFMb3o5m9DK48ecODhfQgWBa2qn1SCbfWeH01xCIQtXXWkXT2qYttQ-o6zfFmpQL7zRyVamKDSS-pOQgv39ch9BdWoedcuJIGNseJD-vLSQHj38vT11Ns_uT3YE3S5CNUZbx6bKAaMCADmQjUXZDXkq3IyEQpPLs9SvNTvLOBoClhKxgUYhHVqtZPrek-Lq2SgT2nozU4PBzgaEEm4uMzLwL3lrTwl9xVTF81rrLZnkHZCDTMNv65t_awm4');
+            background-size: cover;
+            background-position: center;
+            filter: grayscale(100%) contrast(150%) brightness(1.2);
+        }
     </style>
 </head>
 <body class="bg-surface-dim text-on-surface antialiased min-h-screen flex flex-col font-body-base">
@@ -392,17 +412,7 @@
 <div class="hidden md:flex gap-gutter ui-element">
 <a class="font-body-base text-body-base text-primary border-b-2 border-primary pb-1 active:scale-95 transition-transform duration-200" href="#" id="nav-start">Main</a>
 <a class="font-body-base text-body-base text-on-surface-variant hover:text-on-surface transition-colors active:scale-95 transition-transform duration-200" href="#" id="nav-batch">Batch CSV Analysis</a>
-</div>
-<div class="hidden lg:flex items-center gap-2 text-xs font-mono-code text-on-surface-variant/70 border border-on-surface/10 rounded px-2.5 py-1 ui-element" title="Metrik evaluasi model IndoBERT (n=1873)">
-  <span class="material-symbols-outlined text-[13px] text-primary">analytics</span>
-  <span>Acc <strong class="text-primary">90.76%</strong></span>
-  <span class="text-on-surface/20 mx-1">|</span>
-  <span>F1 <strong class="text-primary">86.73%</strong></span>
-</div>
-<div class="flex items-center gap-base ui-element">
-<button aria-label="Toggle dark mode" class="p-2 rounded-full hover:bg-on-surface/5 text-primary active:scale-95 transition-transform duration-200">
-<span class="material-symbols-outlined">dark_mode</span>
-</button>
+<a class="font-body-base text-body-base text-on-surface-variant hover:text-on-surface transition-colors active:scale-95 transition-transform duration-200" href="/presentation">Presentation</a>
 </div>
 </div>
 </nav>
@@ -436,6 +446,14 @@
 <p class="text-on-surface-variant font-mono-code text-mono-code mt-2" id="analysis-status">Processing complete: 10,492 entities analyzed.</p>
 </div>
 <div class="flex items-center gap-4 mt-4 md:mt-0">
+<button class="text-on-surface-variant hover:text-primary transition-colors flex items-center gap-2 text-sm" id="export-xlsx-btn" title="Export Excel">
+<span class="material-symbols-outlined text-[16px]">description</span>
+                    Excel
+                </button>
+<button class="text-on-surface-variant hover:text-primary transition-colors flex items-center gap-2 text-sm" id="export-pdf-btn" title="Export PDF">
+<span class="material-symbols-outlined text-[16px]">picture_as_pdf</span>
+                    PDF
+                </button>
 <button class="text-on-surface-variant hover:text-primary transition-colors flex items-center gap-2 text-sm hidden" id="toggle-view-btn">
 <span class="material-symbols-outlined text-[16px]">dataset</span>
                     View Full Dataset
@@ -468,7 +486,7 @@
 <h3 class="font-label-caps text-label-caps text-on-surface-variant mb-4 uppercase">Kata Dominan</h3>
 <div class="h-64 relative w-full flex justify-center items-center" id="wordcloud-container">
   <canvas id="wordCloudCanvas"></canvas>
-  <p id="wordcloud-empty" class="text-on-surface-variant text-sm" style="display:none;">Tidak ada data teks.</p>
+  <p id="wordcloud-empty" class="text-on-surface-variant text-sm initial-hidden">Tidak ada data teks.</p>
 </div>
 </div>
 <!-- Evaluasi Dinamis -->
@@ -486,7 +504,7 @@
   </div>
   <!-- State: Loading -->
   <div id="eval-loading-state" class="hidden items-center justify-center h-full gap-2 text-on-surface-variant text-sm">
-    <span class="material-symbols-outlined text-primary" style="animation: spin 1s linear infinite">progress_activity</span>
+    <span class="material-symbols-outlined text-primary animate-spin">progress_activity</span>
     Mengevaluasi...
   </div>
   <!-- State: Result -->
@@ -505,7 +523,6 @@
       </thead>
       <tbody id="eval-table-body" class="text-on-surface-variant divide-y divide-outline-variant/10"></tbody>
     </table>
-    <button id="eval-reset-btn" class="mt-1 text-xs text-on-surface/40 hover:text-primary transition-colors self-start">↺ Upload CSV berlabel</button>
   </div>
 </div>
 </div>
@@ -518,7 +535,7 @@
 </div>
 
 <!-- Data Table View -->
-<div class="chart-container col-span-1 md:col-span-2 lg:col-span-3" style="background: rgba(7, 18, 42, 0.92);">
+<div class="chart-container col-span-1 md:col-span-2 lg:col-span-3 glass-panel-dark">
     <h3 class="font-label-caps text-label-caps text-on-surface-variant mb-4 uppercase">Scraped Dataset Preview</h3>
     <div class="overflow-x-auto max-h-96 custom-scrollbar">
         <table class="w-full text-left font-body-base text-sm border-collapse" id="datasetTable">
@@ -537,7 +554,7 @@
             </tbody>
         </table>
     </div>
-    <div class="flex items-center justify-between mt-3 px-1 ui-element" id="analysis-pagination" style="display:none!important;">
+    <div class="flex items-center justify-between mt-3 px-1 ui-element hide-important" id="analysis-pagination">
         <button id="analysis-prev-btn" class="flex items-center gap-1 px-3 py-1.5 rounded border border-outline-variant/40 text-on-surface-variant text-sm hover:bg-on-surface/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
             <span class="material-symbols-outlined text-[16px]">arrow_back</span> Prev
         </button>
@@ -561,6 +578,9 @@
 <p id="csv-drop-label" class="font-label-caps text-label-caps uppercase text-on-surface-variant">Drag and drop CSV files here</p>
 <p class="text-sm text-on-surface/50 mt-2">or click to browse</p>
 </div>
+<button id="batch-reload-btn" class="hidden items-center gap-2 text-sm text-on-surface-variant hover:text-primary transition-colors">
+<span class="material-symbols-outlined text-[16px]">history</span> Muat Hasil Batch Sebelumnya
+</button>
 </div>
 <!-- Batch Result View -->
 <div class="analysis-view flex-col w-full max-w-container-max mx-auto gap-6 mt-8 ui-element" id="batch-result-view">
@@ -570,6 +590,12 @@
             <p id="batch-result-status" class="text-on-surface-variant text-sm mt-1">—</p>
         </div>
         <div class="flex gap-3 mt-4 md:mt-0 flex-wrap">
+            <button id="batch-export-xlsx-btn" class="flex items-center gap-2 px-5 py-2 rounded-lg border border-outline-variant text-on-surface-variant text-sm hover:bg-on-surface/5 transition-colors">
+                <span class="material-symbols-outlined text-[16px]">description</span> Export Excel
+            </button>
+            <button id="batch-export-pdf-btn" class="flex items-center gap-2 px-5 py-2 rounded-lg border border-outline-variant text-on-surface-variant text-sm hover:bg-on-surface/5 transition-colors">
+                <span class="material-symbols-outlined text-[16px]">picture_as_pdf</span> Export PDF
+            </button>
             <button id="batch-download-btn" class="flex items-center gap-2 px-5 py-2 rounded-lg bg-primary text-on-primary font-semibold text-sm hover:opacity-90 transition-opacity">
                 <span class="material-symbols-outlined text-[16px]">download</span> Download CSV
             </button>
@@ -579,7 +605,7 @@
         </div>
     </div>
     <div id="batch-summary" class="flex flex-wrap gap-4"></div>
-    <div class="w-full overflow-x-auto rounded-lg border border-outline-variant/20" style="background: rgba(7, 18, 42, 0.92);">
+    <div class="w-full overflow-x-auto rounded-lg border border-outline-variant/20 glass-panel-dark">
         <table class="w-full text-sm text-left">
             <thead class="bg-surface-dim text-on-surface-variant uppercase text-xs font-semibold">
                 <tr>
@@ -591,7 +617,7 @@
             <tbody id="batch-table-body" class="divide-y divide-outline-variant/10 text-on-surface-variant"></tbody>
         </table>
     </div>
-    <div class="flex items-center justify-between mt-3 px-1 ui-element" id="batch-pagination" style="display:none!important;">
+    <div class="flex items-center justify-between mt-3 px-1 ui-element hide-important" id="batch-pagination">
         <button id="batch-prev-btn" class="flex items-center gap-1 px-3 py-1.5 rounded border border-outline-variant/40 text-on-surface-variant text-sm hover:bg-on-surface/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
             <span class="material-symbols-outlined text-[16px]">arrow_back</span> Prev
         </button>
@@ -620,7 +646,7 @@
         <div class="w-24 h-[1px] bg-outline-variant/30 mt-1"></div>
     </div>
     <!-- Central Silhouette -->
-    <div class="relative w-[300px] h-[400px] md:w-[400px] md:h-[500px] z-10 opacity-90 mix-blend-screen interactive-head-container pulse-head" id="interactive-cranium" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuAUtfhZ6Rl6vtqzC4jZYFMb3o5m9DK48ecODhfQgWBa2qn1SCbfWeH01xCIQtXXWkXT2qYttQ-o6zfFmpQL7zRyVamKDSS-pOQgv39ch9BdWoedcuJIGNseJD-vLSQHj38vT11Ns_uT3YE3S5CNUZbx6bKAaMCADmQjUXZDXkq3IyEQpPLs9SvNTvLOBoClhKxgUYhHVqtZPrek-Lq2SgT2nozU4PBzgaEEm4uMzLwL3lrTwl9xVTF81rrLZnkHZCDTMNv65t_awm4'); background-size: cover; background-position: center; filter: grayscale(100%) contrast(150%) brightness(1.2);">
+    <div class="relative w-[300px] h-[400px] md:w-[400px] md:h-[500px] z-10 opacity-90 mix-blend-screen interactive-head-container pulse-head" id="interactive-cranium">
         <!-- Hairline Frame -->
         <div class="absolute inset-0 border border-outline-variant/30 rounded-full blur-[2px]"></div>
         <!-- Data Swarm: Dense Orbiting Text Layers -->
@@ -1243,23 +1269,13 @@
 // =============================================================
 (function() {
 
+    // Escape untuk atribut HTML (title tooltip clean_text/skip_reason)
+    const escAttr = s => String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+
     // isPrecomputedView must be at IIFE scope so the analyze-btn handler can access it
     let isPrecomputedView = false;
     // Bridge to auto-populate eval panel from training metrics; set by the eval IIFE below
     let _evalAutoPopulate = null;
-
-    // --- Cek status model saat load ---
-    fetch('/api/health').then(r => r.json()).then(d => {
-        // Ubah teks tombol dark_mode menjadi status model (elemen nav sudah ada)
-        const btn = document.querySelector('button[aria-label="Toggle dark mode"]');
-        if (btn) {
-            btn.innerHTML = d.model_loaded
-                ? '<span class="material-symbols-outlined" style="color:#4ade80;font-size:16px">circle</span>'
-                : '<span class="material-symbols-outlined" style="color:#ffb4ab;font-size:16px">circle</span>';
-            btn.title = d.model_loaded ? 'Model Aktif' : 'Model Gagal Dimuat';
-            btn.style.cursor = 'default';
-        }
-    }).catch(() => {});
 
     // --- Simpan referensi initCharts asli (sudah dideklarasikan di atas) ---
     // Intercept tombol Analyze yang sudah ada (#analyze-btn)
@@ -1268,6 +1284,13 @@
     const _topicInput = document.getElementById('topic-input');
     const _analysisTitle = document.getElementById('analysis-title');
     const _analysisStatus = document.getElementById('analysis-status');
+
+    // Decode entitas HTML yang dihasilkan markupsafe.escape() di backend (app.py),
+    // supaya topik yang mengandung & < > ' " tidak salah dianggap "mismatch".
+    function _decodeEscaped(s) {
+        return String(s).replace(/&amp;/g, '&').replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>').replace(/&#39;/g, "'").replace(/&#34;/g, '"');
+    }
 
     if (_analyzeBtn && _topicInput) {
         // Hapus event listener lama dan pasang yang baru
@@ -1283,182 +1306,116 @@
             newBtn.innerHTML = 'Analyzing... <span class="material-symbols-outlined text-[16px]" style="animation:spin 1s linear infinite;display:inline-block">refresh</span>';
             newBtn.disabled = true;
 
+            const lStatusTxt = document.getElementById('loading-status-text');
+            const lCounterVal = document.getElementById('loading-counter-val');
+            let pollTimer = null;
+
             try {
                 const limit    = (window.APP_CONFIG && window.APP_CONFIG.limit)    || 200;
-                const daysBack = (window.APP_CONFIG && window.APP_CONFIG.daysBack) || 7;
-                const mode = isPrecomputedView ? "demo" : "live";
-                const res  = await fetch('/api/scrape', {
+                const daysBack = (window.APP_CONFIG && window.APP_CONFIG.daysBack) || 365;
+                const sources  = ['twitter', 'web', 'threads'];
+
+                if (_analysisStatus) _analysisStatus.textContent = 'Mengambil dan menganalisis data...';
+                if (_analysisTitle)  _analysisTitle.textContent  = `Analysis: ${text}`;
+                if (lStatusTxt) lStatusTxt.textContent = 'MEMPROSES';
+                if (lCounterVal) lCounterVal.textContent = '0';
+                showView('loading');
+
+                const queueRes = await fetch('/api/scrape', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ keyword: text, limit: limit, days_back: daysBack, sources: ['twitter', 'web'], mode: "live" })
+                    body: JSON.stringify({ keyword: text, limit: limit, days_back: daysBack, sources: sources, mode: "live" })
                 });
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.error || 'Gagal memulai analisis');
+                const queueData = await queueRes.json();
+                if (!queueRes.ok) throw new Error(queueData.error || 'Gagal memulai analisis');
 
-                const reqId = data.req_id;
-                if (_analysisStatus) _analysisStatus.textContent = 'Memulai proses scraping...';
-                if (_analysisTitle)  _analysisTitle.textContent  = `Analysis: ${text}`;
-                showView('loading');
-                
-                // Polling logic
-                const POLL_INTERVAL_MS = 2000;
-                const STALL_TIMEOUT_MS = 300_000; // 5 min without progress = truly stuck
-                const MAX_RETRIES      = 5;
-                const PER_REQ_TIMEOUT  = 30_000;  // 30 s per individual fetch
-
-                let fetchFailCount = 0;
-                let _displayedProgress = 0;
-                let _smoothTimer = null;
-                let _lastProgressAt = Date.now(); // reset each time progress increases
-
-                function startSmoothProgress(serverProgress, status) {
-                    if (_smoothTimer) clearInterval(_smoothTimer);
-                    const targets = { SCRAPING: 45, INFERENCING: 90, FINALIZING: 98 };
-                    const target = Math.max(targets[status] || serverProgress, serverProgress);
-                    _smoothTimer = setInterval(() => {
-                        const lCounterVal = document.getElementById('loading-counter-val');
-                        if (_displayedProgress < target) {
-                            _displayedProgress = Math.min(_displayedProgress + 0.4, target);
-                            if (lCounterVal) lCounterVal.textContent = Math.round(_displayedProgress);
-                        } else {
-                            clearInterval(_smoothTimer);
-                        }
-                    }, 150);
+                // Guard: pastikan topik yang benar-benar diproses sistem sama dengan
+                // yang diketik user. Jika berbeda (mis. karena gangguan di sisi
+                // browser), batalkan sebelum scraping berjalan alih-alih diam-diam
+                // menampilkan hasil untuk topik yang salah.
+                if (queueData.keyword !== undefined && _decodeEscaped(queueData.keyword) !== text) {
+                    console.warn(`[Keyword mismatch] typed=${JSON.stringify(text)} system=${JSON.stringify(queueData.keyword)}`);
+                    alert(`Topik yang diproses sistem ("${queueData.keyword}") berbeda dari yang Anda masukkan ("${text}"). Analisis dibatalkan — silakan coba lagi.`);
+                    newBtn.innerHTML = origHTML;
+                    newBtn.disabled = false;
+                    showView('landing');
+                    return;
                 }
 
-                const doPoll = async () => {
-                    if (Date.now() - _lastProgressAt > STALL_TIMEOUT_MS) {
-                        if (_smoothTimer) clearInterval(_smoothTimer);
-                        const lStatusTxt = document.getElementById('loading-status-text');
-                        if (lStatusTxt) lStatusTxt.textContent = 'PROSES TERHENTI — COBA LAGI';
-                        if (_analysisStatus) _analysisStatus.textContent = 'Proses berhenti tanpa kemajuan selama 5 menit.';
-                        newBtn.innerHTML = origHTML;
-                        newBtn.disabled  = false;
-                        showView('landing');
-                        alert('Proses berhenti tanpa kemajuan selama 5 menit. Silakan coba lagi.');
-                        return;
-                    }
+                const finalData = await new Promise((resolve, reject) => {
+                    pollTimer = setInterval(async () => {
+                        try {
+                            const statusRes = await fetch(`/api/scrape/status/${queueData.job_id}`);
+                            const statusData = await statusRes.json();
+                            if (!statusRes.ok) throw new Error(statusData.error || 'Job tidak ditemukan');
 
-                    const controller = new AbortController();
-                    const tid = setTimeout(() => controller.abort(), PER_REQ_TIMEOUT);
+                            if (lCounterVal) lCounterVal.textContent = String(statusData.percent ?? 0);
+                            if (lStatusTxt && statusData.message) lStatusTxt.textContent = statusData.message;
 
-                    try {
-                        const statusRes  = await fetch(`/api/status/${reqId}`, { signal: controller.signal });
-                        clearTimeout(tid);
-                        fetchFailCount = 0; // reset on success
-
-                        const statusData = await statusRes.json();
-                        if (_analysisStatus)
-                            _analysisStatus.textContent = `Processing: ${statusData.message || statusData.status} (${statusData.progress || 0}%)`;
-
-                        // Update Loading View elements
-                        const lStatusTxt = document.getElementById('loading-status-text');
-                        const lCounterVal = document.getElementById('loading-counter-val');
-                        if (lStatusTxt) lStatusTxt.textContent = (statusData.message || statusData.status || 'PROCESSING').toUpperCase();
-                        const serverProg = Math.round(statusData.progress || 0);
-                        if (serverProg > _displayedProgress) {
-                            _lastProgressAt = Date.now(); // pipeline masih bergerak — reset stall clock
-                            _displayedProgress = serverProg;
-                        }
-                        if (lCounterVal) lCounterVal.textContent = Math.round(_displayedProgress);
-                        startSmoothProgress(serverProg, statusData.status || '');
-
-                        // Module highlighting
-                        const state = statusData.status || '';
-                        const mod1 = document.getElementById('module-token');
-                        const mod2 = document.getElementById('module-entity');
-                        const mod3 = document.getElementById('module-vector');
-                        if (mod1) mod1.className = (state === 'SCRAPING') ? 'module-item opacity-100' : 'module-item opacity-40';
-                        if (mod2) mod2.className = (state === 'PROCESSING') ? 'module-item opacity-100' : 'module-item opacity-40';
-                        if (mod3) mod3.className = (state === 'FINALIZING' || state === 'COMPLETED') ? 'module-item opacity-100' : 'module-item opacity-40';
-
-                        if (statusData.status === 'COMPLETED') {
-                            if (_smoothTimer) clearInterval(_smoothTimer);
-                            if (lCounterVal) lCounterVal.textContent = '100';
-                            if (statusData.total_results === 0) {
-                                if (_analysisTitle)  _analysisTitle.textContent  = `Analysis: ${text}`;
-                                if (_analysisStatus) _analysisStatus.textContent = 'No data found for the given keyword.';
-                                newBtn.innerHTML = origHTML;
-                                newBtn.disabled  = false;
-                                showView('landing');
-                                alert('No data found for the given keyword.');
-                                return;
+                            if (statusData.status === 'done') {
+                                clearInterval(pollTimer);
+                                resolve(statusData.result);
+                            } else if (statusData.status === 'error') {
+                                clearInterval(pollTimer);
+                                reject(new Error(statusData.error || 'Gagal memproses analisis'));
                             }
-                            fetch(`/api/results/${reqId}`)
-                                .then(r => r.json())
-                                .then(finalData => {
-                                    if (_analysisTitle)  _analysisTitle.textContent  = `Analysis: ${text}`;
-                                    if (_analysisStatus) _analysisStatus.textContent =
-                                        `Done - Total: ${statusData.total_results} data - Time: ${new Date().toLocaleTimeString()}`;
-                                    const badge = document.getElementById('demo-badge');
-                                    if (badge) badge.classList.add('hidden');
-                                    const toggleBtn = document.getElementById('toggle-view-btn');
-                                    if (toggleBtn) {
-                                        toggleBtn.classList.remove('hidden');
-                                        toggleBtn.innerHTML = '<span class="material-symbols-outlined text-[16px]">dataset</span> View Full Dataset';
-                                    }
-                                    isPrecomputedView = false;
-                                    const mappedData = {
-                                        summary: {
-                                            total:          finalData.summary?.total          ?? finalData.distribution?.total    ?? 0,
-                                            positive_count: finalData.summary?.positive_count ?? finalData.distribution?.positive ?? 0,
-                                            neutral_count:  finalData.summary?.neutral_count  ?? finalData.distribution?.neutral  ?? 0,
-                                            negative_count: finalData.summary?.negative_count ?? finalData.distribution?.negative ?? 0,
-                                        },
-                                        timeline:       finalData.timeline       || [],
-                                        word_freq:      finalData.word_freq      || [],
-                                        confidence_avg: finalData.confidence_avg || { positive: 0, neutral: 0, negative: 0 },
-                                        model_metrics:  finalData.model_metrics  || {},
-                                        results:        finalData.top_items      || [],
-                                    };
-                                    currentAnalysisReqId = reqId;
-                                    showView('analysis');
-                                    initChartsWithData(mappedData);
-                                    newBtn.innerHTML = origHTML;
-                                    newBtn.disabled  = false;
-                                })
-                                .catch(e => {
-                                    console.error('Gagal memuat hasil akhir', e);
-                                    if (_analysisStatus) _analysisStatus.textContent = 'Error memuat hasil akhir';
-                                    newBtn.innerHTML = origHTML;
-                                    newBtn.disabled  = false;
-                                    showView('landing');
-                                });
-                            return; // do not schedule next poll
+                        } catch (pollErr) {
+                            clearInterval(pollTimer);
+                            reject(pollErr);
                         }
+                    }, 700);
+                });
 
-                        if (statusData.status === 'FAILED' || statusData.status === 'NOT_FOUND') {
-                            if (_smoothTimer) clearInterval(_smoothTimer);
-                            if (_analysisStatus) _analysisStatus.textContent = 'Error: ' + (statusData.message || 'Proses gagal');
-                            newBtn.innerHTML = origHTML;
-                            newBtn.disabled  = false;
-                            showView('landing');
-                            alert('Proses gagal: ' + (statusData.message || 'Error'));
-                            return;
-                        }
+                if (finalData.total_results === 0) {
+                    if (_analysisTitle)  _analysisTitle.textContent  = `Analysis: ${text}`;
+                    if (_analysisStatus) _analysisStatus.textContent = 'No data found for the given keyword.';
+                    newBtn.innerHTML = origHTML;
+                    newBtn.disabled  = false;
+                    showView('landing');
+                    alert('No data found for the given keyword.');
+                    return;
+                }
 
-                    } catch (pollErr) {
-                        clearTimeout(tid);
-                        fetchFailCount++;
-                        if (fetchFailCount >= MAX_RETRIES) {
-                            if (_analysisStatus) _analysisStatus.textContent = 'Error saat mengecek status: ' + pollErr.message;
-                            newBtn.innerHTML = origHTML;
-                            newBtn.disabled  = false;
-                            showView('landing');
-                            alert('Error: ' + pollErr.message);
-                            return;
-                        }
-                        // silent retry after 3 s
-                        setTimeout(doPoll, 3000);
-                        return;
+                if (_analysisTitle)  _analysisTitle.textContent  = `Analysis: ${text}`;
+                let _statusText = `Done - Total: ${finalData.total_results} data - Time: ${new Date().toLocaleTimeString()}`;
+                const _ostats = finalData.outlier_stats;
+                if (_ostats) {
+                    const _newsAccount = _ostats.news_account_removed || 0;
+                    const _newsStyle = _ostats.news_style_removed || 0;
+                    if ((_ostats.duplicates_removed + _ostats.outliers_removed + _ostats.empty_removed + _newsAccount + _newsStyle) > 0) {
+                        _statusText += ` (disaring: ${_ostats.duplicates_removed} duplikat, ${_ostats.outliers_removed} outlier, ${_ostats.empty_removed} kosong, ${_newsAccount + _newsStyle} gaya berita dari ${_ostats.total_before} data mentah)`;
                     }
-
-                    setTimeout(doPoll, POLL_INTERVAL_MS);
+                }
+                if (_analysisStatus) _analysisStatus.textContent = _statusText;
+                const badge = document.getElementById('demo-badge');
+                if (badge) badge.classList.add('hidden');
+                const toggleBtn = document.getElementById('toggle-view-btn');
+                if (toggleBtn) {
+                    toggleBtn.classList.remove('hidden');
+                    toggleBtn.innerHTML = '<span class="material-symbols-outlined text-[16px]">dataset</span> View Full Dataset';
+                }
+                isPrecomputedView = false;
+                const mappedData = {
+                    summary: {
+                        total:          finalData.summary?.total          ?? finalData.distribution?.total    ?? 0,
+                        positive_count: finalData.summary?.positive_count ?? finalData.distribution?.positive ?? 0,
+                        neutral_count:  finalData.summary?.neutral_count  ?? finalData.distribution?.neutral  ?? 0,
+                        negative_count: finalData.summary?.negative_count ?? finalData.distribution?.negative ?? 0,
+                    },
+                    timeline:       finalData.timeline       || [],
+                    word_freq:      finalData.word_freq      || [],
+                    confidence_avg: finalData.confidence_avg || { positive: 0, neutral: 0, negative: 0 },
+                    model_metrics:  finalData.model_metrics  || {},
+                    results:        finalData.top_items      || [],
                 };
-
-                doPoll();
+                currentAnalysisReqId = finalData.req_id;
+                showView('analysis');
+                initChartsWithData(mappedData);
+                newBtn.innerHTML = origHTML;
+                newBtn.disabled  = false;
 
             } catch(err) {
+                if (pollTimer) clearInterval(pollTimer);
                 alert('Error: ' + err.message);
                 showView('landing');
                 newBtn.innerHTML = origHTML;
@@ -1478,6 +1435,16 @@
     let currentAnalysisReqId = null;
     let activeFilterDays = 'all';
 
+    // --- Export Excel/PDF (Analysis View) ---
+    document.getElementById('export-xlsx-btn')?.addEventListener('click', () => {
+        if (!currentAnalysisReqId) { alert('Tidak ada data untuk diekspor.'); return; }
+        window.location.href = `/api/export/${currentAnalysisReqId}?format=xlsx`;
+    });
+    document.getElementById('export-pdf-btn')?.addEventListener('click', () => {
+        if (!currentAnalysisReqId) { alert('Tidak ada data untuk diekspor.'); return; }
+        window.location.href = `/api/export/${currentAnalysisReqId}?format=pdf`;
+    });
+
     // --- Time Filter ---
     function _setActiveFilterBtn(days) {
         document.querySelectorAll('.time-filter-btn').forEach(b => {
@@ -1495,7 +1462,7 @@
             const resp = await fetch(url);
             if (!resp.ok) return;
             const data = await resp.json();
-            updateTimelineChart(data.timeline || []);
+            updateTimelineChart(data.timeline || [], data.timeline_granularity || 'day');
             renderWordCloud(data.word_freq || []);
             updateDoughnutChart(data.summary || {});
         } catch (e) {
@@ -1553,10 +1520,18 @@
     }
 
     // --- Updatable chart helpers ---
-    function updateTimelineChart(tlData) {
+    function _formatTimelineLabel(dateStr, granularity) {
+        const d = new Date(dateStr);
+        if (isNaN(d)) return dateStr;
+        if (granularity === 'month') return d.toLocaleDateString('id-ID', { month: 'short', year: 'numeric' });
+        if (granularity === 'week')  return 'Minggu ' + d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short' });
+        return dateStr;
+    }
+
+    function updateTimelineChart(tlData, granularity) {
         const chart = _chartInstances.timeline;
         if (!chart) return;
-        chart.data.labels = tlData.map(d => d.date);
+        chart.data.labels = tlData.map(d => _formatTimelineLabel(d.date, granularity));
         chart.data.datasets[0].data = tlData.map(d => d.positive);
         chart.data.datasets[1].data = tlData.map(d => d.neutral);
         chart.data.datasets[2].data = tlData.map(d => d.negative);
@@ -1591,8 +1566,9 @@
         };
 
         // Timeline Chart — full-width line chart
-        const tlData   = apiData.timeline || [];
-        const tlLabels = tlData.map(d => d.date);
+        const tlData       = apiData.timeline || [];
+        const tlGranularity = apiData.timeline_granularity || 'day';
+        const tlLabels = tlData.map(d => _formatTimelineLabel(d.date, tlGranularity));
         _chartInstances.timeline = new Chart(document.getElementById('timelineChart'), {
             type: 'line',
             data: {
@@ -1723,10 +1699,10 @@
                     tr.innerHTML = `
                         <td class="p-3 whitespace-nowrap text-xs text-on-surface/60">${row.date || '-'}</td>
                         <td class="p-3 whitespace-nowrap text-xs font-mono-code">${row.source || '-'}</td>
-                        <td class="p-3 text-sm leading-relaxed">${row.raw_text || row.text || '-'}</td>
+                        <td class="p-3 text-sm leading-relaxed" title="Teks yang dianalisis: ${escAttr(row.clean_text)}">${row.raw_text || row.text || '-'}${row.skipped ? ` <span class="ml-1 text-xs opacity-70" title="${escAttr(row.skip_reason)}">⚠ Dilewati</span>` : ''}</td>
                         <td class="p-3 whitespace-nowrap font-semibold" style="color: ${labelColor}">${row.predicted_label || '-'}</td>
-                        <td class="p-3 whitespace-nowrap text-xs font-mono-code">${(row.confidence_positive || 0).toFixed(2)} / ${(row.confidence_negative || 0).toFixed(2)} / ${(row.confidence_neutral || 0).toFixed(2)}</td>
-                        <td class="p-3 whitespace-nowrap text-xs font-mono-code font-semibold text-primary">${(((row.confidence_overall || row.confidence || 0) * 100)).toFixed(1)}%</td>
+                        <td class="p-3 whitespace-nowrap text-xs font-mono-code">${((row.confidence_positive || 0) * 100).toFixed(2)}% / ${((row.confidence_negative || 0) * 100).toFixed(2)}% / ${((row.confidence_neutral || 0) * 100).toFixed(2)}%</td>
+                        <td class="p-3 whitespace-nowrap text-xs font-mono-code font-semibold text-primary">${(((row.confidence_overall || row.confidence || 0) * 100)).toFixed(2)}%</td>
                     `;
                     tbody.appendChild(tr);
                 });
@@ -1759,6 +1735,16 @@
     document.head.appendChild(style);
 
     // --- Batch CSV Drag & Drop ---
+    let currentBatchReqId = null;
+    document.getElementById('batch-export-xlsx-btn')?.addEventListener('click', () => {
+        if (!currentBatchReqId) { alert('Tidak ada data untuk diekspor.'); return; }
+        window.location.href = `/api/export/${currentBatchReqId}?format=xlsx`;
+    });
+    document.getElementById('batch-export-pdf-btn')?.addEventListener('click', () => {
+        if (!currentBatchReqId) { alert('Tidak ada data untuk diekspor.'); return; }
+        window.location.href = `/api/export/${currentBatchReqId}?format=pdf`;
+    });
+
     (function() {
         const dropZone  = document.getElementById('csv-drop-zone');
         const fileInput = document.getElementById('csv-file-input');
@@ -1793,49 +1779,90 @@
             if (lCounter) lCounter.textContent = '0';
             showView('loading');
 
-            // Simulate smooth progress while waiting for synchronous API
-            let fakeProgress = 0;
-            const fakeTimer = setInterval(() => {
-                fakeProgress = Math.min(fakeProgress + 1.2, 85);
-                if (lCounter) lCounter.textContent = Math.round(fakeProgress);
-                if (lStatus) {
-                    if (fakeProgress < 30) lStatus.textContent = 'MEMBACA CSV';
-                    else if (fakeProgress < 60) lStatus.textContent = 'MENGANALISIS SENTIMEN';
-                    else lStatus.textContent = 'MENYUSUN HASIL';
-                }
-            }, 300);
-
             const fd = new FormData();
             fd.append('csv_file', file);
 
+            let pollTimer = null;
+
             try {
-                const res  = await fetch('/api/batch', { method: 'POST', body: fd });
-                const data = await res.json();
-                clearInterval(fakeTimer);
-                if (lCounter) lCounter.textContent = '100';
-                if (lStatus)  lStatus.textContent  = 'SELESAI';
-                if (!res.ok) throw new Error(data.error || 'Gagal memproses CSV');
-                _csvContent = data.csv_content || '';
-                renderBatchResults(data, file.name);
+                const queueRes  = await fetch('/api/batch', { method: 'POST', body: fd });
+                const queueData = await queueRes.json();
+                if (!queueRes.ok) throw new Error(queueData.error || 'Gagal memulai proses CSV');
+
+                const resData = await new Promise((resolve, reject) => {
+                    pollTimer = setInterval(async () => {
+                        try {
+                            const statusRes = await fetch(`/api/batch/status/${queueData.job_id}`);
+                            const statusData = await statusRes.json();
+                            if (!statusRes.ok) throw new Error(statusData.error || 'Job tidak ditemukan');
+
+                            if (lCounter) lCounter.textContent = String(statusData.percent ?? 0);
+                            if (lStatus && statusData.message) lStatus.textContent = statusData.message;
+
+                            if (statusData.status === 'done') {
+                                clearInterval(pollTimer);
+                                resolve(statusData.result);
+                            } else if (statusData.status === 'error') {
+                                clearInterval(pollTimer);
+                                reject(new Error(statusData.error || 'Gagal memproses CSV'));
+                            }
+                        } catch (pollErr) {
+                            clearInterval(pollTimer);
+                            reject(pollErr);
+                        }
+                    }, 700);
+                });
+
+                _csvContent = resData.csv_content || '';
+                if (resData.req_id) localStorage.setItem('sentimens_batch_req_id', resData.req_id);
+                renderBatchResults(resData, file.name);
                 showView('batch-results');
             } catch (err) {
-                clearInterval(fakeTimer);
+                if (pollTimer) clearInterval(pollTimer);
                 alert('Error: ' + err.message);
                 showView('batch');
+                return;
             }
         }
 
+        // --- Reload hasil batch sebelumnya (req_id tersimpan di localStorage) ---
+        async function reloadLastBatch() {
+            const reqId = localStorage.getItem('sentimens_batch_req_id');
+            if (!reqId) return;
+            try {
+                const res  = await fetch(`/api/batch/results/${reqId}`);
+                const data = await res.json();
+                if (!res.ok) { localStorage.removeItem('sentimens_batch_req_id'); return; }
+                _csvContent = data.csv_content || '';
+                renderBatchResults(data, 'hasil_sebelumnya.csv');
+                showView('batch-results');
+            } catch (e) {
+                console.error('Gagal memuat ulang hasil batch sebelumnya', e);
+            }
+        }
+
+        const reloadBtn = document.getElementById('batch-reload-btn');
+        if (reloadBtn) {
+            if (localStorage.getItem('sentimens_batch_req_id')) {
+                reloadBtn.classList.remove('hidden');
+                reloadBtn.style.display = 'inline-flex';
+            }
+            reloadBtn.addEventListener('click', reloadLastBatch);
+        }
+
         function renderBatchResults(data, filename) {
+            currentBatchReqId = data.req_id || null;
             const statusEl = document.getElementById('batch-result-status');
             if (statusEl) statusEl.textContent = `${filename} — ${data.total_results} baris diproses`;
 
             const summaryEl = document.getElementById('batch-summary');
             const s = data.summary || {};
             summaryEl.innerHTML = [
-                { label: 'Total',   val: data.total_results || 0, color: '#c5c6cd' },
-                { label: 'Positif', val: s.positif           || 0, color: '#d9e2ff' },
-                { label: 'Netral',  val: s.netral             || 0, color: '#515f78' },
-                { label: 'Negatif', val: s.negatif            || 0, color: '#ffb4ab' },
+                { label: 'Total',    val: data.total_results || 0, color: '#c5c6cd' },
+                { label: 'Positif',  val: s.positif           || 0, color: '#d9e2ff' },
+                { label: 'Netral',   val: s.netral             || 0, color: '#515f78' },
+                { label: 'Negatif',  val: s.negatif            || 0, color: '#ffb4ab' },
+                { label: 'Dilewati', val: s.invalid            || 0, color: '#8b8f9c' },
             ].map(({ label, val, color }) =>
                 `<div class="px-4 py-2 rounded-lg border border-outline-variant/20 text-center min-w-[90px]">
                    <div class="text-lg font-semibold" style="color:${color}">${val}</div>
@@ -1857,9 +1884,9 @@
                     const tr    = document.createElement('tr');
                     tr.className = 'hover:bg-on-surface/5 transition-colors';
                     tr.innerHTML = `
-                        <td class="p-3 text-sm leading-relaxed max-w-[500px]">${row.raw_text || '-'}</td>
+                        <td class="p-3 text-sm leading-relaxed max-w-[500px]" title="Teks yang dianalisis: ${escAttr(row.clean_text)}">${row.raw_text || '-'}${row.skipped ? ` <span class="ml-1 text-xs opacity-70" title="${escAttr(row.skip_reason)}">⚠ Dilewati</span>` : ''}</td>
                         <td class="p-3 whitespace-nowrap font-semibold" style="color:${color}">${row.predicted_label || '-'}</td>
-                        <td class="p-3 whitespace-nowrap text-xs font-mono-code">${(row.confidence_positive||0).toFixed(2)} / ${(row.confidence_negative||0).toFixed(2)} / ${(row.confidence_neutral||0).toFixed(2)}</td>`;
+                        <td class="p-3 whitespace-nowrap text-xs font-mono-code">${((row.confidence_positive||0)*100).toFixed(2)}% / ${((row.confidence_negative||0)*100).toFixed(2)}% / ${((row.confidence_neutral||0)*100).toFixed(2)}%</td>`;
                     tbody.appendChild(tr);
                 });
 
@@ -1981,7 +2008,6 @@
             this.value = '';
         });
 
-        document.getElementById('eval-reset-btn')?.addEventListener('click', () => showEvalState('upload'));
     })();
 
 })();

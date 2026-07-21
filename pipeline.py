@@ -1,57 +1,27 @@
-import threading
 import uuid
 import httpx
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
-from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 from pathlib import Path
 
-from config import SCRAPER_BASE_URL, SCRAPER_ENDPOINT, SCRAPER_TIMEOUT
+from config import (
+    SCRAPER_BASE_URL, SCRAPER_ENDPOINT, SCRAPER_TIMEOUT,
+    INFERENCE_TIMEOUT_PER_ITEM_SEC, INFERENCE_TIMEOUT_MIN_SEC, INFERENCE_TIMEOUT_MAX_SEC,
+)
 from inference import predict_batch
-from preprocessing import preprocess_text
-from utils import generate_csv_output, calculate_summary, send_notification
+from preprocessing import preprocess_text, is_valid_text
+from utils import generate_csv_output, calculate_summary, remove_outliers_and_duplicates, filter_news_style_content
 
 logger = logging.getLogger(__name__)
-
-# State Store: memory dictionary protected by lock
-_status_store = {}
-_status_lock = threading.Lock()
-
-# States
-PENDING = "PENDING"
-SCRAPING = "SCRAPING"
-INFERENCING = "INFERENCING"
-FINALIZING = "FINALIZING"
-COMPLETED = "COMPLETED"
-FAILED = "FAILED"
 
 DATA_DIR = Path("data")
 DATA_DIR.mkdir(exist_ok=True)
 
-def _update_status(req_id: str, status: str, message: str = "", progress: int = 0, **kwargs):
-    with _status_lock:
-        if req_id not in _status_store:
-            _status_store[req_id] = {
-                "id": req_id,
-                "created_at": datetime.now().isoformat(),
-            }
-        _status_store[req_id].update({
-            "status": status,
-            "message": message,
-            "progress": progress,
-            "updated_at": datetime.now().isoformat(),
-            **kwargs
-        })
 
-def get_status(req_id: str) -> dict:
-    with _status_lock:
-        return _status_store.get(req_id, {"status": "NOT_FOUND"})
-
-
-def _scrape_via_subprocess(keyword: str, limit: int) -> list:
+def _scrape_via_subprocess(keyword: str, limit: int, source_type: str) -> list:
     """
-    Jalankan scraper_worker.py sebagai subprocess terpisah.
+    Jalankan scraper_worker.py sebagai subprocess terpisah untuk satu source.
     Playwright butuh proses clean — tidak bisa spawn dari Flask thread.
 
     FIX #2 — Windows Encoding:
@@ -73,7 +43,7 @@ def _scrape_via_subprocess(keyword: str, limit: int) -> list:
 
     try:
         result = subprocess.run(
-            [python, worker, keyword, str(limit)],
+            [python, worker, keyword, str(limit), source_type],
             capture_output=True,
             text=True,
             encoding="utf-8",    # FIX #2: paksa UTF-8, bukan cp1252
@@ -83,242 +53,346 @@ def _scrape_via_subprocess(keyword: str, limit: int) -> list:
             env=env,
         )
         if result.returncode != 0:
-            logger.warning(f"[Worker] stderr: {result.stderr[:400]}")
+            logger.warning(f"[Worker:{source_type}] stderr: {result.stderr[:400]}")
 
         stdout = result.stdout.strip() if result.stdout else ""
         if stdout:
-            return _json.loads(stdout)
+            data = _json.loads(stdout)
+            for item in data:
+                item["source"] = source_type
+            return data
         return []
     except subprocess.TimeoutExpired:
-        logger.error("[Worker] Subprocess timeout (300s)")
+        logger.error(f"[Worker:{source_type}] Subprocess timeout (300s)")
         return []
     except Exception as e:
-        logger.error(f"[Worker] Subprocess error: {e}")
+        logger.error(f"[Worker:{source_type}] Subprocess error: {e}")
         return []
 
 
-def _scrape_in_process(keyword: str, limit: int, sources: list, req_id: str = None) -> list:
+def _scrape_in_process(keyword: str, limit: int, sources: list, progress_cb=None) -> list:
     """
-    Scrape menggunakan subprocess worker terpisah per source.
+    Scrape semua source yang diminta secara paralel, masing-masing lewat
+    subprocess worker terpisah (fallback saat scraper service eksternal mati).
     """
-    results = []
-    limit_per_source = max(5, limit // max(len(sources), 1))
-
+    need_sources = []
     if "twitter" in sources:
-        logger.info(f"[Pipeline] Social search via subprocess: {keyword}")
-        enriched = f"{keyword} pendapat komentar ulasan netizen"
-        social = _scrape_via_subprocess(enriched, limit_per_source)
-        for item in social:
-            item["source"] = "twitter"
-        results.extend(social)
-        logger.info(f"[Pipeline] Social: {len(social)} hasil")
-        if req_id:
-            _update_status(req_id, SCRAPING, f"Data sosial selesai ({len(social)} item), mengambil berita...", 25)
-
+        need_sources.append("twitter")
     if "web" in sources or "news" in sources:
-        logger.info(f"[Pipeline] Web search via subprocess: {keyword}")
-        web = _scrape_via_subprocess(keyword, limit_per_source)
-        results.extend(web)
-        logger.info(f"[Pipeline] Web: {len(web)} hasil")
-        if req_id:
-            _update_status(req_id, SCRAPING, f"Data web selesai ({len(web)} item), menyusun data...", 40)
+        need_sources.append("web")
+    if "threads" in sources:
+        need_sources.append("threads")
 
-    # Deduplicate
-    seen = set()
-    unique = []
-    for item in results:
-        t = item.get("raw_text", "")[:80]
-        if t and t not in seen:
-            seen.add(t)
-            unique.append(item)
+    results = []
+    if need_sources:
+        limit_per_source = max(5, limit // len(need_sources))
+        logger.info(f"[Pipeline] Fallback in-process scraping: {keyword} | sources={need_sources}")
 
-    return unique[:limit]
+        done_count = 0
+        with ThreadPoolExecutor(max_workers=len(need_sources), thread_name_prefix="scrape-fallback") as pool:
+            futures = {
+                pool.submit(_scrape_via_subprocess, keyword, limit_per_source, src): src
+                for src in need_sources
+            }
+            for future in as_completed(futures):
+                src = futures[future]
+                try:
+                    data = future.result()
+                except Exception as e:
+                    logger.error(f"[Pipeline] Fallback {src} gagal: {e}")
+                    data = []
+                results.extend(data)
+                done_count += 1
+                logger.info(f"[Pipeline] Fallback {src}: {len(data)} hasil")
+                if progress_cb:
+                    progress_cb(done_count, len(need_sources))
+
+    return results
 
 
-def start_scrape_pipeline(keyword: str, limit: int, sources: list[str], mode: str = "demo", days_back: int = 7) -> str:
-    req_id = str(uuid.uuid4())
-    _update_status(req_id, PENDING, "Mempersiapkan proses scraping...", 0, mode=mode)
-    
-    def _run():
-        try:
-            _update_status(req_id, SCRAPING, f"Sedang mengambil data untuk kata kunci '{keyword}'...", 10, mode=mode)
+def _fallback_pred() -> dict:
+    return {
+        "predicted_label": "Netral",
+        "confidence_positive": 0.333,
+        "confidence_negative": 0.333,
+        "confidence_neutral": 0.334,
+        "inference_time_ms": 0.0,
+    }
 
-            # ── FIX #1: timeout diperbesar ── httpx default 10s terlalu cepat
-            # Scraping butuh ~60-120 detik (Twitter + web search paralel)
-            # Pakai timeout dari config (SCRAPER_TIMEOUT = 300s)
-            try:
-                scraper_url = f"{SCRAPER_BASE_URL}{SCRAPER_ENDPOINT}"
-                response = httpx.post(
-                    scraper_url,
-                    json={"keyword": keyword, "limit": limit, "sources": sources, "days_back": days_back},
-                    timeout=httpx.Timeout(
-                        connect=10.0,   # Koneksi awal cepat (scraper harus sudah jalan)
-                        read=300.0,     # FIX #1: Tunggu 5 menit untuk scraping selesai
-                        write=10.0,
-                        pool=5.0,
-                    ),
-                )
-                response.raise_for_status()
-                scraper_data = response.json()
-                if scraper_data.get("status") == "success":
-                    data = scraper_data.get("data", [])
-                    logger.info(f"[Pipeline] Scraper eksternal: {len(data)} hasil")
-            except Exception as ext_err:
-                logger.warning(f"[Pipeline] Scraper eksternal tidak tersedia ({ext_err}), pakai in-process scraping")
-                data = _scrape_in_process(keyword, limit, sources, req_id=req_id)
 
-            # ── FIX #3: Graceful handling jika 0 hasil ────────────────────
-            # Jangan crash — buat file CSV kosong agar Dashboard tidak error.
-            if not data:
-                logger.warning(f"[Pipeline] Tidak ada data yang berhasil diambil untuk '{keyword}'")
-                # Buat CSV kosong yang valid (header saja) agar /api/download tidak 404
-                empty_csv = generate_csv_output([])
-                file_path  = DATA_DIR / f"{req_id}.csv"
-                with open(file_path, "w", encoding="utf-8-sig", newline="") as f:
-                    f.write(empty_csv)
-                _update_status(
-                    req_id, COMPLETED,
-                    f"Tidak ada data yang berhasil diambil untuk '{keyword}'. "
-                    "Coba kata kunci lain atau perbarui cookie X (jalankan: python export_twitter_cookies.py).",
-                    100,
-                    total_results=0,
-                    file_path=str(file_path),
-                    summary={"Positif": 0, "Negatif": 0, "Netral": 0, "total": 0},
-                    keyword=keyword,
-                )
-                return
+def _skipped_pred() -> dict:
+    return {
+        "predicted_label": "Netral",
+        "confidence_positive": 0.0,
+        "confidence_negative": 0.0,
+        "confidence_neutral": 0.0,
+        "inference_time_ms": 0.0,
+        "skipped": True,
+        "skip_reason": "Dilewati: konten tidak cukup setelah pembersihan",
+    }
 
-            _update_status(req_id, INFERENCING, "Menganalisis sentimen...", 50)
 
-            raw_texts    = [t.get("raw_text", "")  for t in data]
-            dates        = [t.get("date",     "")  for t in data]
-            sources_list = [t.get("source",   "")  for t in data]
-            clean_texts  = [preprocess_text(text)  for text in raw_texts]
-            clean_texts  = [t[:1000] for t in clean_texts]  # cap: cegah tokenizer hang pada teks sangat panjang
+def _noop_progress(stage: str, percent: int, message: str = "") -> None:
+    pass
 
-            ITEM_TIMEOUT_SEC = 30
-            def _fallback_pred():
-                return {
-                    "predicted_label": "Netral",
-                    "confidence_positive": 0.333,
-                    "confidence_negative": 0.333,
-                    "confidence_neutral": 0.334,
-                    "inference_time_ms": 0.0,
-                }
 
-            predictions = []
-            total = len(clean_texts)
-            with ThreadPoolExecutor(max_workers=1, thread_name_prefix="bert-infer") as infer_pool:
-                for i, txt in enumerate(clean_texts):
-                    logger.info(f"[Inference] ({i+1}/{total}) chars={len(txt)} | {txt[:60]!r}")
-                    t0 = time.perf_counter()
-                    future = infer_pool.submit(predict_batch, [txt])
-                    try:
-                        pred = future.result(timeout=ITEM_TIMEOUT_SEC)[0]
-                    except FuturesTimeoutError:
-                        logger.warning(f"[Inference] Item {i+1}/{total} timeout ({ITEM_TIMEOUT_SEC}s) — fallback Netral")
-                        pred = _fallback_pred()
-                    except Exception as item_err:
-                        logger.error(f"[Inference] Item {i+1} gagal: {item_err}", exc_info=True)
-                        pred = _fallback_pred()
-                    elapsed_ms = (time.perf_counter() - t0) * 1000
-                    logger.info(f"[Inference] ✓ ({i+1}/{total}) → {pred['predicted_label']} ({elapsed_ms:.0f}ms)")
-                    predictions.append(pred)
-                    time.sleep(0.05)  # release GIL so Flask can serve status polls
-                    if (i + 1) % 5 == 0 or (i + 1) == total:
-                        progress = 50 + int(((i + 1) / total) * 45)
-                        _update_status(req_id, INFERENCING, f"Menganalisis sentimen... ({i+1}/{total})", progress)
+def _inference_timeout(n_items: int) -> float:
+    return min(INFERENCE_TIMEOUT_MAX_SEC, max(INFERENCE_TIMEOUT_MIN_SEC, INFERENCE_TIMEOUT_PER_ITEM_SEC * n_items))
 
-            _update_status(req_id, FINALIZING, "Menyusun hasil...", 95)
-            logger.info(f"[Pipeline] FINALIZING: menyusun {len(predictions)} hasil...")
 
-            results = []
-            for raw, clean, date, src, pred in zip(raw_texts, clean_texts, dates, sources_list, predictions):
-                results.append({
-                    "raw_text":            raw,
-                    "clean_text":          clean,
-                    "date":                date,
-                    "source":              src,
-                    "predicted_label":     pred.get("predicted_label",     "Netral"),
-                    "confidence_positive": pred.get("confidence_positive", 0.0),
-                    "confidence_negative": pred.get("confidence_negative", 0.0),
-                    "confidence_neutral":  pred.get("confidence_neutral",  0.0),
-                    "inference_time_ms":   pred.get("inference_time_ms",   0.0),
-                })
+def _predict_all(clean_texts: list[str], progress_cb=None) -> list[dict]:
+    """Jalankan inferensi batch dengan satu timeout keseluruhan sebagai jaring pengaman.
 
-            logger.info(f"[Pipeline] FINALIZING: results siap, generate CSV...")
-            _update_status(req_id, FINALIZING, "Menyimpan data...", 97)
+    Tidak memakai `with ThreadPoolExecutor(...)`: keluar dari context manager memanggil
+    `shutdown(wait=True)`, yang akan tetap memblokir caller sampai worker yang sudah
+    dianggap timeout benar-benar selesai — meniadakan timeout itu sendiri. `shutdown(wait=False)`
+    dipanggil eksplisit di tiap cabang supaya caller benar-benar terbebas begitu timeout tercapai.
+    """
+    if not clean_texts:
+        return []
+    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="bert-infer")
+    future = pool.submit(predict_batch, clean_texts, 32, progress_cb)
+    timeout = _inference_timeout(len(clean_texts))
+    try:
+        result = future.result(timeout=timeout)
+        pool.shutdown(wait=False)
+        return result
+    except FuturesTimeoutError:
+        logger.warning(
+            f"[Inference] Timeout setelah {timeout:.0f}s — fallback Netral untuk {len(clean_texts)} item "
+            "(worker thread dibiarkan jalan di background, hasilnya dibuang)."
+        )
+        pool.shutdown(wait=False)
+        return [_fallback_pred() for _ in clean_texts]
+    except Exception as e:
+        logger.error(f"[Inference] Gagal: {e}", exc_info=True)
+        pool.shutdown(wait=False)
+        return [_fallback_pred() for _ in clean_texts]
 
-            csv_content = generate_csv_output(results)
-            logger.info(f"[Pipeline] FINALIZING: CSV {len(csv_content)} chars, menulis ke disk...")
-            file_path = DATA_DIR / f"{req_id}.csv"
-            with open(file_path, "w", encoding="utf-8-sig", newline="") as f:
-                f.write(csv_content)
-            logger.info(f"[Pipeline] FINALIZING: CSV tersimpan → {file_path}")
 
-            _update_status(req_id, FINALIZING, "Menghitung ringkasan...", 99)
-            summary = calculate_summary(results)
-            logger.info(f"[Pipeline] FINALIZING: ringkasan selesai → {summary}")
+def _predict_valid_only(clean_texts: list[str], progress_cb=None) -> list[dict]:
+    """Hanya kirim teks yang lolos is_valid_text() (min_chars=3) ke model;
+    sisanya ditandai skip tanpa memanggil model sama sekali."""
+    valid_idx = [i for i, t in enumerate(clean_texts) if is_valid_text(t)]
+    valid_preds = _predict_all([clean_texts[i] for i in valid_idx], progress_cb=progress_cb)
+    predictions = [_skipped_pred() for _ in clean_texts]
+    for idx, pred in zip(valid_idx, valid_preds):
+        predictions[idx] = pred
+    return predictions
 
-            _update_status(req_id, COMPLETED, "Selesai", 100,
-                           total_results=len(results),
-                           file_path=str(file_path),
-                           summary=summary,
-                           keyword=keyword)
-            logger.info(f"[Pipeline] COMPLETED: {len(results)} item")
 
-        except Exception as e:
-            logger.error(f"Pipeline error tidak terduga: {e}", exc_info=True)
-            _update_status(req_id, FAILED, "Terjadi kesalahan tidak terduga saat memproses. Silakan coba lagi.", 0)
+def run_scrape_pipeline(
+    keyword: str,
+    limit: int,
+    sources: list[str],
+    mode: str = "live",
+    days_back: int = 7,
+    req_id: str | None = None,
+    progress_cb=None,
+) -> dict:
+    req_id = req_id or str(uuid.uuid4())
+    progress_cb = progress_cb or _noop_progress
 
-    thread = threading.Thread(target=_run, daemon=True)
-    thread.start()
-    return req_id
+    progress_cb("scraping", 5, "Mengambil data dari Twitter/X, Web, dan Threads...")
 
-def start_batch_pipeline(raw_texts: list[str]) -> str:
-    req_id = str(uuid.uuid4())
-    _update_status(req_id, PENDING, "Mempersiapkan data CSV...", 0)
-    
-    def _run():
-        try:
-            _update_status(req_id, INFERENCING, f"Memproses {len(raw_texts)} baris data...", 10)
-            
-            clean_texts = [preprocess_text(str(text).strip()) if str(text).strip() else "" for text in raw_texts]
-            predictions = predict_batch(clean_texts)
-            
-            results = []
-            for raw, clean, pred in zip(raw_texts, clean_texts, predictions):
-                raw_str = str(raw).strip()
-                is_empty = not raw_str or not clean
-                if is_empty:
-                    pred["skipped"] = True
-                results.append({
-                    "raw_text": raw_str,
-                    "clean_text": clean,
-                    "predicted_label": pred.get("predicted_label", "Netral"),
-                    "confidence_positive": pred.get("confidence_positive", 0.0),
-                    "confidence_negative": pred.get("confidence_negative", 0.0),
-                    "confidence_neutral": pred.get("confidence_neutral", 0.0),
-                    "inference_time_ms": pred.get("inference_time_ms", 0.0),
-                    "skipped": pred.get("skipped", False),
-                })
-                
-            csv_content = generate_csv_output(results)
-            file_path = DATA_DIR / f"{req_id}.csv"
-            with open(file_path, "w", encoding="utf-8-sig", newline="") as f:
-                f.write(csv_content)
-                
-            summary = calculate_summary(results)
-            
-            _update_status(req_id, COMPLETED, "Selesai", 100, 
-                           total_results=len(results), 
-                           file_path=str(file_path),
-                           summary=summary)
-                           
-        except Exception as e:
-            logger.error(f"Batch Pipeline error: {e}", exc_info=True)
-            _update_status(req_id, FAILED, f"Gagal memproses: {str(e)}", 0)
+    expanded_keyword = keyword
+    plain_keyword = keyword
+    expansion_status = "scraper_service_unavailable_fallback"
 
-    thread = threading.Thread(target=_run, daemon=True)
-    thread.start()
-    return req_id
+    try:
+        scraper_url = f"{SCRAPER_BASE_URL}{SCRAPER_ENDPOINT}"
+        response = httpx.post(
+            scraper_url,
+            json={"keyword": keyword, "limit": limit, "sources": sources, "days_back": days_back},
+            timeout=httpx.Timeout(
+                connect=10.0,           # Koneksi awal cepat (scraper harus sudah jalan)
+                read=SCRAPER_TIMEOUT,   # Harus >= timeout internal scraper service
+                write=10.0,
+                pool=5.0,
+            ),
+        )
+        response.raise_for_status()
+        scraper_data = response.json()
+        if scraper_data.get("status") == "success":
+            data = scraper_data.get("data", [])
+            expanded_keyword = scraper_data.get("expanded_keyword", keyword)
+            plain_keyword = scraper_data.get("plain_keyword", keyword)
+            expansion_status = scraper_data.get("expansion_status", "unknown")
+            logger.info(f"[Pipeline] Scraper eksternal: {len(data)} hasil")
+        else:
+            data = []
+    except Exception as ext_err:
+        logger.warning(f"[Pipeline] Scraper eksternal tidak tersedia ({ext_err}), pakai in-process scraping")
+
+        def _scrape_sub_cb(done: int, total: int) -> None:
+            pct = 5 + int(45 * done / total) if total else 50
+            progress_cb("scraping", pct, f"Scraping fallback: {done}/{total} sumber selesai")
+
+        data = _scrape_in_process(keyword, limit, sources, progress_cb=_scrape_sub_cb)
+
+    progress_cb("scraping", 50, "Scraping selesai.")
+
+    # Graceful handling jika 0 hasil — buat CSV kosong agar dashboard tidak error.
+    if not data:
+        logger.warning(f"[Pipeline] Tidak ada data yang berhasil diambil untuk '{keyword}'")
+        empty_csv = generate_csv_output([])
+        file_path = DATA_DIR / f"{req_id}.csv"
+        with open(file_path, "w", encoding="utf-8-sig", newline="") as f:
+            f.write(empty_csv)
+        return {
+            "req_id": req_id,
+            "total_results": 0,
+            "file_path": str(file_path),
+            "summary": {"Positif": 0, "Negatif": 0, "Netral": 0, "total": 0},
+            "keyword": keyword,
+            "expanded_keyword": expanded_keyword,
+            "plain_keyword": plain_keyword,
+            "expansion_status": expansion_status,
+        }
+
+    data, outlier_stats = remove_outliers_and_duplicates(data, text_key="raw_text")
+
+    data, news_stats = filter_news_style_content(data)
+    outlier_stats["news_account_removed"] = news_stats["news_account_removed"]
+    outlier_stats["news_style_removed"] = news_stats["news_style_removed"]
+    outlier_stats["total_after"] = news_stats["total_after"]
+
+    data = data[:limit]
+    logger.info(
+        f"[Pipeline] Filter data mentah: {outlier_stats['total_before']} -> {outlier_stats['total_after']} "
+        f"(duplikat={outlier_stats['duplicates_removed']}, kosong={outlier_stats['empty_removed']}, "
+        f"outlier={outlier_stats['outliers_removed']}, akun_berita={outlier_stats['news_account_removed']}, "
+        f"gaya_berita={outlier_stats['news_style_removed']})"
+    )
+    progress_cb(
+        "filtering", 52,
+        f"Menyaring {outlier_stats['duplicates_removed']} duplikat, "
+        f"{outlier_stats['outliers_removed']} outlier, dan "
+        f"{outlier_stats['news_account_removed'] + outlier_stats['news_style_removed']} konten berita...",
+    )
+
+    if not data:
+        logger.warning(f"[Pipeline] Seluruh data untuk '{keyword}' tersaring sebagai duplikat/outlier")
+        empty_csv = generate_csv_output([])
+        file_path = DATA_DIR / f"{req_id}.csv"
+        with open(file_path, "w", encoding="utf-8-sig", newline="") as f:
+            f.write(empty_csv)
+        return {
+            "req_id": req_id,
+            "total_results": 0,
+            "file_path": str(file_path),
+            "summary": {"Positif": 0, "Negatif": 0, "Netral": 0, "total": 0},
+            "keyword": keyword,
+            "expanded_keyword": expanded_keyword,
+            "plain_keyword": plain_keyword,
+            "expansion_status": expansion_status,
+            "outlier_stats": outlier_stats,
+        }
+
+    raw_texts    = [t.get("raw_text", "") for t in data]
+    dates        = [t.get("date",     "") for t in data]
+    sources_list = [t.get("source",   "") for t in data]
+
+    progress_cb("preprocessing", 55, "Praproses teks...")
+    clean_texts  = [preprocess_text(text)[:1000] for text in raw_texts]  # cap: cegah tokenizer hang
+    progress_cb("preprocessing", 60, "Praproses selesai.")
+
+    for i, (raw, clean) in enumerate(zip(raw_texts[:5], clean_texts[:5])):
+        logger.info(f"[Pipeline][Sample {i+1}] raw={raw[:80]!r} -> clean={clean[:80]!r}")
+
+    def _infer_cb(done: int, total: int) -> None:
+        pct = 60 + int(40 * done / total) if total else 100
+        progress_cb("predicting", pct, f"Menganalisis sentimen ({done}/{total})...")
+
+    logger.info(f"[Pipeline] Menganalisis sentimen untuk {len(clean_texts)} item...")
+    t0 = time.perf_counter()
+    predictions = _predict_valid_only(clean_texts, progress_cb=_infer_cb)
+    logger.info(f"[Pipeline] Inferensi selesai dalam {(time.perf_counter() - t0) * 1000:.0f}ms")
+
+    results = []
+    for raw, clean, date, src, pred in zip(raw_texts, clean_texts, dates, sources_list, predictions):
+        results.append({
+            "raw_text":            raw,
+            "clean_text":          clean,
+            "date":                date,
+            "source":              src,
+            "predicted_label":     pred.get("predicted_label",     "Netral"),
+            "confidence_positive": pred.get("confidence_positive", 0.0),
+            "confidence_negative": pred.get("confidence_negative", 0.0),
+            "confidence_neutral":  pred.get("confidence_neutral",  0.0),
+            "inference_time_ms":   pred.get("inference_time_ms",   0.0),
+            "skipped":             pred.get("skipped", False),
+            "skip_reason":         pred.get("skip_reason", ""),
+        })
+
+    csv_content = generate_csv_output(results)
+    file_path = DATA_DIR / f"{req_id}.csv"
+    with open(file_path, "w", encoding="utf-8-sig", newline="") as f:
+        f.write(csv_content)
+    logger.info(f"[Pipeline] CSV tersimpan → {file_path}")
+
+    summary = calculate_summary(results)
+    logger.info(f"[Pipeline] Selesai: {len(results)} item")
+
+    return {
+        "req_id": req_id,
+        "total_results": len(results),
+        "file_path": str(file_path),
+        "summary": summary,
+        "keyword": keyword,
+        "expanded_keyword": expanded_keyword,
+        "plain_keyword": plain_keyword,
+        "expansion_status": expansion_status,
+        "outlier_stats": outlier_stats,
+    }
+
+
+def run_batch_pipeline(raw_texts: list[str], req_id: str | None = None, progress_cb=None) -> dict:
+    req_id = req_id or str(uuid.uuid4())
+    progress_cb = progress_cb or _noop_progress
+
+    progress_cb("preprocessing", 2, "Praproses data...")
+    clean_texts = [
+        preprocess_text(str(text).strip())[:1000] if str(text).strip() else ""
+        for text in raw_texts
+    ]
+    progress_cb("preprocessing", 10, "Praproses selesai.")
+
+    for i, (raw, clean) in enumerate(zip(raw_texts[:5], clean_texts[:5])):
+        logger.info(f"[Batch][Sample {i+1}] raw={str(raw)[:80]!r} -> clean={clean[:80]!r}")
+
+    def _infer_cb(done: int, total: int) -> None:
+        pct = 10 + int(90 * done / total) if total else 100
+        progress_cb("predicting", pct, f"Menganalisis sentimen ({done}/{total})...")
+
+    logger.info(f"[Batch] Menganalisis sentimen untuk {len(clean_texts)} baris...")
+    predictions = _predict_valid_only(clean_texts, progress_cb=_infer_cb)
+
+    results = []
+    for raw, clean, pred in zip(raw_texts, clean_texts, predictions):
+        raw_str = str(raw).strip()
+        results.append({
+            "raw_text": raw_str,
+            "clean_text": clean,
+            "predicted_label": pred.get("predicted_label", "Netral"),
+            "confidence_positive": pred.get("confidence_positive", 0.0),
+            "confidence_negative": pred.get("confidence_negative", 0.0),
+            "confidence_neutral": pred.get("confidence_neutral", 0.0),
+            "inference_time_ms": pred.get("inference_time_ms", 0.0),
+            "skipped": pred.get("skipped", False),
+            "skip_reason": pred.get("skip_reason", ""),
+        })
+
+    csv_content = generate_csv_output(results)
+    file_path = DATA_DIR / f"{req_id}.csv"
+    with open(file_path, "w", encoding="utf-8-sig", newline="") as f:
+        f.write(csv_content)
+
+    summary = calculate_summary(results)
+
+    return {
+        "req_id": req_id,
+        "total_results": len(results),
+        "file_path": str(file_path),
+        "summary": summary,
+    }

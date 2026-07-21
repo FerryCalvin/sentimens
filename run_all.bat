@@ -20,10 +20,10 @@ if exist "venv\Scripts\activate.bat" (
 )
 
 echo.
-echo [INFO] Memulai FastAPI Scraper Service (Port 8000)...
-start "FastAPI Scraper - Port 8000" cmd /k "cd /d %~dp0scraper && uvicorn main:app --port 8000"
+echo [INFO] Memulai Flask Scraper Service (Port 8000)...
+start "Flask Scraper - Port 8000" cmd /k "cd /d %~dp0scraper && python main.py"
 
-REM Tunggu sebentar agar FastAPI siap
+REM Tunggu sebentar agar scraper siap
 timeout /t 3 /nobreak > nul
 
 echo [INFO] Memulai Flask Main Application (Port 5000)...
@@ -34,9 +34,9 @@ echo  ============================================
 echo   KEDUA SERVER SEDANG BERJALAN
 echo  ============================================
 echo.
-echo   Flask App:       http://localhost:5000
-echo   FastAPI Scraper: http://localhost:8000
-echo   FastAPI Docs:    http://localhost:8000/docs
+echo   Flask App:    http://localhost:5000
+echo   Scraper API:  http://localhost:8000
+echo   Health Check: http://localhost:8000/health
 echo.
 echo   Tekan CTRL+C di masing-masing terminal untuk berhenti.
 echo.

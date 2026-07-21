@@ -8,6 +8,8 @@ __pycache__/
 *.env
 scraper/twitter_session.json
 scraper/cookies_config.json
+scraper/threads_cookies_config.json
+scraper/threads_session.json
 .env
 
 # Models
@@ -17,3 +19,7 @@ models/
 data/*.csv
 data
 datasets_verif
+raw/
+
+# Docs
+CLAUDE.md
