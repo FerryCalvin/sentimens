@@ -543,7 +543,8 @@
                 <tr>
                     <th class="p-3 border-b border-outline-variant/30 font-semibold whitespace-nowrap">Date</th>
                     <th class="p-3 border-b border-outline-variant/30 font-semibold whitespace-nowrap">Source</th>
-                    <th class="p-3 border-b border-outline-variant/30 font-semibold w-1/2">Text</th>
+                    <th class="p-3 border-b border-outline-variant/30 font-semibold w-1/3">Teks Bersih</th>
+                    <th class="p-3 border-b border-outline-variant/30 font-semibold w-1/4">Teks Asli</th>
                     <th class="p-3 border-b border-outline-variant/30 font-semibold whitespace-nowrap">Label</th>
                     <th class="p-3 border-b border-outline-variant/30 font-semibold whitespace-nowrap">Conf (Pos/Neg/Neu)</th>
                     <th class="p-3 border-b border-outline-variant/30 font-semibold whitespace-nowrap">Conf</th>
@@ -609,6 +610,7 @@
         <table class="w-full text-sm text-left">
             <thead class="bg-surface-dim text-on-surface-variant uppercase text-xs font-semibold">
                 <tr>
+                    <th class="p-3 whitespace-nowrap">Teks Bersih</th>
                     <th class="p-3 whitespace-nowrap">Teks Asli</th>
                     <th class="p-3 whitespace-nowrap">Sentimen</th>
                     <th class="p-3 whitespace-nowrap">Conf (Pos/Neg/Neu)</th>
@@ -1699,7 +1701,8 @@
                     tr.innerHTML = `
                         <td class="p-3 whitespace-nowrap text-xs text-on-surface/60">${row.date || '-'}</td>
                         <td class="p-3 whitespace-nowrap text-xs font-mono-code">${row.source || '-'}</td>
-                        <td class="p-3 text-sm leading-relaxed" title="Teks yang dianalisis: ${escAttr(row.clean_text)}">${row.raw_text || row.text || '-'}${row.skipped ? ` <span class="ml-1 text-xs opacity-70" title="${escAttr(row.skip_reason)}">⚠ Dilewati</span>` : ''}</td>
+                        <td class="p-3 text-sm leading-relaxed">${row.clean_text || row.text || '-'}${row.skipped ? ` <span class="ml-1 text-xs opacity-70" title="${escAttr(row.skip_reason)}">⚠ Dilewati</span>` : ''}</td>
+                        <td class="p-3 text-sm leading-relaxed text-on-surface/50 max-w-[280px] truncate" title="${escAttr(row.raw_text || row.text || '')}">${row.raw_text || row.text || '-'}</td>
                         <td class="p-3 whitespace-nowrap font-semibold" style="color: ${labelColor}">${row.predicted_label || '-'}</td>
                         <td class="p-3 whitespace-nowrap text-xs font-mono-code">${((row.confidence_positive || 0) * 100).toFixed(2)}% / ${((row.confidence_negative || 0) * 100).toFixed(2)}% / ${((row.confidence_neutral || 0) * 100).toFixed(2)}%</td>
                         <td class="p-3 whitespace-nowrap text-xs font-mono-code font-semibold text-primary">${(((row.confidence_overall || row.confidence || 0) * 100)).toFixed(2)}%</td>
@@ -1884,7 +1887,8 @@
                     const tr    = document.createElement('tr');
                     tr.className = 'hover:bg-on-surface/5 transition-colors';
                     tr.innerHTML = `
-                        <td class="p-3 text-sm leading-relaxed max-w-[500px]" title="Teks yang dianalisis: ${escAttr(row.clean_text)}">${row.raw_text || '-'}${row.skipped ? ` <span class="ml-1 text-xs opacity-70" title="${escAttr(row.skip_reason)}">⚠ Dilewati</span>` : ''}</td>
+                        <td class="p-3 text-sm leading-relaxed max-w-[400px]">${row.clean_text || '-'}${row.skipped ? ` <span class="ml-1 text-xs opacity-70" title="${escAttr(row.skip_reason)}">⚠ Dilewati</span>` : ''}</td>
+                        <td class="p-3 text-sm leading-relaxed text-on-surface/50 max-w-[220px] truncate" title="${escAttr(row.raw_text || '')}">${row.raw_text || '-'}</td>
                         <td class="p-3 whitespace-nowrap font-semibold" style="color:${color}">${row.predicted_label || '-'}</td>
                         <td class="p-3 whitespace-nowrap text-xs font-mono-code">${((row.confidence_positive||0)*100).toFixed(2)}% / ${((row.confidence_negative||0)*100).toFixed(2)}% / ${((row.confidence_neutral||0)*100).toFixed(2)}%</td>`;
                     tbody.appendChild(tr);
