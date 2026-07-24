@@ -53,11 +53,29 @@ from typing import List
 from datetime import datetime, timezone
 from pathlib import Path
 
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+
 logger = logging.getLogger(__name__)
 
 COOKIES_FILE = Path(__file__).parent / "cookies_config.json"
 SESSION_FILE = Path(__file__).parent / "twitter_session.json"  # fallback lama
 DEFAULT_TIMEOUT = 45_000
+
+
+async def _goto_with_retry(page, url: str, *, timeout: int = DEFAULT_TIMEOUT, attempts: int = 3) -> None:
+    """page.goto dengan retry saat timeout navigasi (bukan indikasi cookie invalid)."""
+    for attempt in range(1, attempts + 1):
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=timeout)
+            return
+        except PlaywrightTimeoutError:
+            if attempt == attempts:
+                raise
+            logger.warning(
+                f"Timeout navigasi ke {url} (percobaan {attempt}/{attempts}) — "
+                f"bukan indikasi cookie invalid, mencoba lagi..."
+            )
+            await asyncio.sleep(random.uniform(2.0, 4.0))
 
 
 def _load_cookies() -> dict:
@@ -123,13 +141,16 @@ async def scrape_twitter(keyword: str, limit: int, days_back: int = 7) -> List[d
 
 async def _scrape_one_window(
     search_url: str, limit: int, *, cookies: dict | None = None, storage_state: str | None = None
-) -> tuple[List[dict], bool]:
+) -> tuple[List[dict], bool, bool]:
     """
     Buka 1 context (browser bersama dari browser_manager), scrape 1 window
     pencarian (1 rentang tanggal), lalu tutup context (bukan browser).
-    Returns (results, auth_failed) — auth_failed=True berarti cookie/session
-    tidak valid (redirect ke login), sehingga caller sebaiknya berhenti
-    mencoba bucket berikutnya dan fallback ke jalur auth lain.
+    Returns (results, auth_failed, network_timeout):
+      - auth_failed=True berarti cookie/session tidak valid (redirect ke
+        login), sehingga caller sebaiknya berhenti mencoba bucket berikutnya
+        dan fallback ke jalur auth lain.
+      - network_timeout=True berarti navigasi timeout berulang kali (bukan
+        masalah cookie) — window ini dilewati, tapi bucket lain tetap dicoba.
     """
     from browser_manager import manager as browser_manager
 
@@ -158,13 +179,13 @@ async def _scrape_one_window(
         page = await context.new_page()
 
         logger.info(f"Membuka: {search_url}")
-        await page.goto(search_url, wait_until="domcontentloaded", timeout=DEFAULT_TIMEOUT)
+        await _goto_with_retry(page, search_url)
         await asyncio.sleep(4)
 
         cur_url = page.url
         if any(x in cur_url.lower() for x in ["login", "i/flow", "signup"]):
             logger.warning(f"Auth tidak valid — redirect ke {cur_url}")
-            return [], True
+            return [], True, False
 
         results = await _collect_tweets(page, search_url, limit)
 
@@ -176,7 +197,7 @@ async def _scrape_one_window(
                 f"Top tab exhausted ({len(results)}/{limit}) — "
                 f"switching to Latest tab for {remaining} more..."
             )
-            await page.goto(latest_url, wait_until="domcontentloaded", timeout=DEFAULT_TIMEOUT)
+            await _goto_with_retry(page, latest_url)
             await asyncio.sleep(3)
             more = await _collect_tweets(page, latest_url, remaining)
             existing_keys = {r["raw_text"][:80] for r in results}
@@ -190,12 +211,18 @@ async def _scrape_one_window(
             if added:
                 logger.info(f"Latest tab added {added} tweets. Total: {len(results)}")
 
+    except PlaywrightTimeoutError:
+        logger.error(
+            f"Window dilewati: timeout jaringan berulang saat membuka {search_url} — "
+            f"TIDAK terkait cookie (tidak ada redirect ke halaman login terdeteksi)."
+        )
+        return [], False, True
     except Exception as e:
         logger.error(f"Error scraping window: {e}", exc_info=True)
     finally:
         await context.close()
 
-    return results, False
+    return results, False, False
 
 
 async def _scrape_windowed(keyword: str, limit: int, days_back: int, *,
@@ -207,6 +234,7 @@ async def _scrape_windowed(keyword: str, limit: int, days_back: int, *,
     per_bucket_limit = max(5, limit // len(buckets))
     all_results: List[dict] = []
     seen: set = set()
+    timeout_buckets = 0
 
     for i, (since_date, until_date) in enumerate(buckets):
         if len(all_results) >= limit:
@@ -214,12 +242,14 @@ async def _scrape_windowed(keyword: str, limit: int, days_back: int, *,
         full_query = f"{keyword} since:{since_date} until:{until_date}"
         search_url = f"https://x.com/search?q={urllib.parse.quote(full_query)}&src=typed_query&f=top"
 
-        window_results, auth_failed = await _scrape_one_window(
+        window_results, auth_failed, network_timeout = await _scrape_one_window(
             search_url, per_bucket_limit, cookies=cookies, storage_state=storage_state
         )
         if auth_failed:
             logger.warning("Auth invalid pada bucket pertama — menghentikan loop, jalur ini dianggap gagal total.")
             return []
+        if network_timeout:
+            timeout_buckets += 1
 
         for r in window_results:
             key = r["raw_text"][:80]
@@ -232,6 +262,11 @@ async def _scrape_windowed(keyword: str, limit: int, days_back: int, *,
 
     if len(buckets) > 1:
         logger.info(f"Windowed scrape: {len(buckets)} bucket, {len(all_results)} tweet unik terkumpul")
+    if timeout_buckets:
+        logger.warning(
+            f"Windowed scrape: {timeout_buckets} bucket dilewati karena timeout "
+            f"jaringan (bukan cookie invalid — tidak ada redirect ke login)."
+        )
 
     return all_results[:limit]
 
